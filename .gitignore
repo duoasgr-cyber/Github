@@ -34,10 +34,17 @@ Desktop.ini
 *.pdiparams
 *.pdmodel
 *.pdiparams.info
-easyocr_models/
-paddle_models/
-models/
-models_easyocr/
-Data/session/
-Data/profile/
-logs/
+
+# Model directories
+**/easyocr_models/
+**/paddle_models/
+**/models/
+**/models_easyocr/
+
+# Session & runtime data
+**/Data/session/
+**/Data/profile/
+**/logs/
+
+# CI
+.github/
