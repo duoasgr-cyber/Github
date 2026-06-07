@@ -1,0 +1,66 @@
+{
+  "buy_params": {
+    "user_price": 0.5,
+    "price_coefficient": 1,
+    "min_price": 0,
+    "max_mail_count": 1
+  },
+  "mail_params": {
+    "mail_count_file": "",
+    "auto_increment": false
+  },
+  "schedule": {
+    "enabled": false,
+    "start_time": "00:00"
+  },
+  "recognition": {
+    "template_threshold": 0.0,
+    "template_dir": "",
+    "ocr_gpu": false
+  },
+  "ocr_regions": {
+    "price_region": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "button_region": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    }
+  },
+  "wifi_control": {
+    "enable_cmd": "",
+    "disable_cmd": ""
+  },
+  "device": {
+    "game_package": "",
+    "base_resolution": {
+      "width": 1,
+      "height": 1
+    },
+    "scrcpy_server_path": ""
+  },
+  "timing": {
+    "default_wait": 0.0,
+    "screenshot_wait": 0.0,
+    "game_start_wait": 1,
+    "match_wait": 1
+  },
+  "logging": {
+    "log_file": "app.log",
+    "log_level": "DEBUG",
+    "max_log_size_mb": 1
+  },
+  "ui": {
+    "theme": "dark",
+    "floating_window_opacity": 0.0,
+    "floating_window_bg": "",
+    "price_color": "",
+    "mail_color": "",
+    "status_color": ""
+  }
+}

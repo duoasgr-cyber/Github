@@ -1,0 +1,16 @@
+Line 93: self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+Line 348: self._connection_label = QLabel("杩炴帴: 鏂紑")
+Line 363: self._tray_icon.setToolTip("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+Line 435: logging.critical("鏈崟鑾风殑寮傚父:\n%s", tb_text)
+Line 437: self._log_panel._append_log(f"鏈崟鑾风殑寮傚父: {exc_value}", logging.ERROR)
+Line 475: logging.warning("鏈€夋嫨宸ヤ綔娴侊紝无法启动鐩戞帶")
+Line 487: logging.info("鍚姩鐩戞帶: %s", workflow_name)
+
+Remaining:
+  Line 93: self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+  Line 348: self._connection_label = QLabel("杩炴帴: 鏂紑")
+  Line 363: self._tray_icon.setToolTip("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+  Line 435: logging.critical("鏈崟鑾风殑寮傚父:\n%s", tb_text)
+  Line 437: self._log_panel._append_log(f"鏈崟鑾风殑寮傚父: {exc_value}", logging.ERROR)
+  Line 475: logging.warning("鏈€夋嫨宸ヤ綔娴侊紝无法启动鐩戞帶")
+  Line 487: logging.info("鍚姩鐩戞帶: %s", workflow_name)

@@ -1,0 +1,112 @@
+﻿{
+  "snippets": {
+    "tap_confirm": {
+      "name": "Tap Confirm Button",
+      "description": "Tap the confirm button and wait",
+      "category": "common",
+      "step_template": {
+        "type": "tap",
+        "x": 2555,
+        "y": 1145,
+        "comment": "Confirm button",
+        "wait_after": 1
+      },
+      "parameters": [
+        {"name": "x", "type": "int", "label": "X Coordinate", "default": 2555},
+        {"name": "y", "type": "int", "label": "Y Coordinate", "default": 1145},
+        {"name": "wait_after", "type": "float", "label": "Wait After (s)", "default": 1}
+      ]
+    },
+    "check_screen_match": {
+      "name": "Check Screen Template",
+      "description": "Check if current screen matches a template image",
+      "category": "recognition",
+      "step_template": {
+        "type": "check_image",
+        "template": "",
+        "threshold": 0.85,
+        "comment": "Check screen state"
+      },
+      "parameters": [
+        {"name": "template", "type": "string", "label": "Template File", "default": ""},
+        {"name": "threshold", "type": "float", "label": "Match Threshold", "default": 0.85}
+      ]
+    },
+    "ocr_read_price": {
+      "name": "OCR Read Price",
+      "description": "Read a price value from screen using OCR",
+      "category": "recognition",
+      "step_template": {
+        "type": "ocr_region",
+        "region": {"left": 1316, "top": 648, "right": 1590, "bottom": 703},
+        "comment": "OCR price region"
+      },
+      "parameters": [
+        {"name": "region", "type": "region", "label": "OCR Region", "default": {"left": 1316, "top": 648, "right": 1590, "bottom": 703}}
+      ]
+    },
+    "restart_app": {
+      "name": "Restart Application",
+      "description": "Force stop and relaunch an application",
+      "category": "common",
+      "step_template": {
+        "type": "force_stop",
+        "package": "",
+        "comment": "Stop app",
+        "wait_after": 0.5
+      },
+      "follow_up": {
+        "type": "launch",
+        "package": "",
+        "comment": "Launch app",
+        "wait_after": 25
+      },
+      "parameters": [
+        {"name": "package", "type": "string", "label": "Package Name", "default": ""}
+      ]
+    },
+    "wait_for_image": {
+      "name": "Wait For Image",
+      "description": "Loop until a template image appears on screen",
+      "category": "control_flow",
+      "step_template": {
+        "type": "loop",
+        "max_count": 500,
+        "condition": {
+          "type": "image_found",
+          "template": "",
+          "threshold": 0.85
+        },
+        "steps": [
+          {"type": "wait", "seconds": 0.2, "comment": "Wait and re-check"}
+        ],
+        "comment": "Wait for image to appear"
+      },
+      "parameters": [
+        {"name": "template", "type": "string", "label": "Template File", "default": ""},
+        {"name": "max_count", "type": "int", "label": "Max Attempts", "default": 500},
+        {"name": "check_interval", "type": "float", "label": "Check Interval (s)", "default": 0.2}
+      ]
+    },
+    "wifi_toggle": {
+      "name": "WiFi Toggle",
+      "description": "Disable and re-enable WiFi (network reset)",
+      "category": "network",
+      "step_template": {
+        "type": "wifi",
+        "action": "disable",
+        "comment": "Disable WiFi",
+        "wait_after": 2
+      },
+      "follow_up": {
+        "type": "wifi",
+        "action": "enable",
+        "comment": "Enable WiFi",
+        "wait_after": 5
+      },
+      "parameters": [
+        {"name": "wait_after", "type": "float", "label": "Wait Between (s)", "default": 2}
+      ]
+    }
+  }
+}

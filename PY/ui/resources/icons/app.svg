@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a7fff"/>
+      <stop offset="100%" stop-color="#1a5cc7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#0d1117"/>
+  <path d="M32 6 L54 18 L54 38 Q54 52 32 58 Q10 52 10 38 L10 18 Z" fill="url(#shieldGrad)" stroke="#1f6feb" stroke-width="1.5"/>
+  <path d="M32 14 L46 22 L46 36 Q46 46 32 50 Q18 46 18 36 L18 22 Z" fill="none" stroke="#e6edf3" stroke-width="1.2" opacity="0.3"/>
+  <line x1="32" y1="20" x2="32" y2="44" stroke="#e6edf3" stroke-width="1.5" opacity="0.9"/>
+  <line x1="20" y1="32" x2="44" y2="32" stroke="#e6edf3" stroke-width="1.5" opacity="0.9"/>
+  <circle cx="32" cy="32" r="5" fill="none" stroke="#e6edf3" stroke-width="1.5" opacity="0.9"/>
+  <circle cx="32" cy="32" r="1.5" fill="#e6edf3"/>
+  <line x1="32" y1="20" x2="32" y2="24" stroke="#e6edf3" stroke-width="2" opacity="0.9"/>
+  <line x1="32" y1="40" x2="32" y2="44" stroke="#e6edf3" stroke-width="2" opacity="0.9"/>
+  <line x1="20" y1="32" x2="24" y2="32" stroke="#e6edf3" stroke-width="2" opacity="0.9"/>
+  <line x1="40" y1="32" x2="44" y2="32" stroke="#e6edf3" stroke-width="2" opacity="0.9"/>
+</svg>

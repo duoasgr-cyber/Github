@@ -1,0 +1,6 @@
+PyQt5>=5.15
+easyocr>=1.7
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=10.0
+pyinstaller>=6.0

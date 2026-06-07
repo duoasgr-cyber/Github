@@ -1,0 +1,57 @@
+- [x] 项目目录结构已创建（config/、core/、ui/、lib/ 等）
+- [x] scrcpy-server.jar 已从 Escrcpy 提取到 lib/ 目录
+- [x] config.json 包含全部规划配置项，格式正确可加载
+- [x] workflows.json 包含从旧代码提取的所有工作流，每个工作流有 description、device_resolution、steps
+- [x] config_manager.py 能正确读写 config.json 和 workflows.json
+- [x] config_manager.py 支持热更新（修改后立即写入文件）
+- [x] config_manager.py 支持格式校验和损坏恢复默认值
+- [x] adb_core.py 使用 subprocess.run 统一封装所有 ADB 命令
+- [x] adb_core.py 支持超时控制、输出捕获、错误处理
+- [x] screen_capture.py 能启动 scrcpy-server 并接收 H.264 视频流
+- [x] screen_capture.py 使用 OpenCV+FFmpeg 解码帧为 numpy 数组
+- [x] screen_capture.py 持久连接 + 只保留最新帧
+- [x] screen_capture.py 连接断开时自动重试（最多 3 次）
+- [x] ocr_engine.py EasyOCR 单例懒加载，异步初始化
+- [x] ocr_engine.py 支持价格识别（数字清理、末位纠正、位数校验）
+- [x] ocr_engine.py 支持按钮文字识别（中文/数字判断）
+- [x] device_manager.py 支持设备列表、连接、断开检测
+- [x] device_manager.py 能获取设备分辨率
+- [x] step_executor.py 支持全部 18 种步骤类型
+- [x] step_executor.py 支持暂停/停止/单步执行
+- [x] step_executor.py 步骤级错误恢复（retry_count + on_fail）
+- [x] step_executor.py 自动分辨率换算（基准 vs 设备分辨率）
+- [x] step_executor.py condition 步骤使用 JSON 结构化条件
+- [x] step_executor.py loop 步骤支持 max_count + condition 双控
+- [x] 集成测试：after_buy 工作流能正确执行
+- [x] 集成测试：check_image 和 ocr_region 步骤能正确执行
+- [x] main_window.py 主窗口显示正确：左侧导航 + 右侧面板 + 底部日志 + 状态栏
+- [x] main.py 入口文件能启动 GUI
+- [x] QSystemTrayIcon 系统托盘功能正常（显示/隐藏/退出）
+- [x] style.qss 深色主题样式正确应用
+- [x] log_panel.py 日志面板能显示日志，支持级别过滤和颜色
+- [x] 全局使用 logging 替代 print，双输出到 GUI 和文件
+- [x] workflow_panel.py 工作流编辑面板框架正确
+- [x] step_list_widget.py 支持拖拽排序和选中高亮
+- [x] step_editor.py 根据步骤类型动态显示参数表单
+- [x] screenshot_picker.py 从 scrcpy 实时帧获取画面
+- [x] screenshot_picker.py 点击标注坐标并自动换算为手机实际坐标
+- [x] screenshot_picker.py 支持手动校准模式
+- [x] 步骤 CRUD 功能正常（添加、删除、修改、复制）
+- [x] 保存后 workflows.json 同步更新
+- [x] 工作流管理功能正常（新建、删除、重命名）
+- [x] 单步测试功能正常
+- [x] 从某步开始运行功能正常
+- [x] 整个工作流试运行功能正常
+- [x] 执行过程可视化（当前步骤高亮、进度条）
+- [x] config_panel.py 参数配置面板功能正常
+- [x] config_panel.py GUI 修改后立即写入 config.json
+- [x] device_panel.py 设备管理面板功能正常
+- [x] status_panel.py 运行监控面板功能正常
+- [x] float_widget.py PyQt5 QWidget 悬浮窗功能正常
+- [x] workflow_engine.py 主循环编排正确运行
+- [x] PyInstaller onedir 模式打包成功
+- [x] scrcpy-server.jar 已打包在内
+- [x] 应用图标和托盘图标已设计
+- [x] QSS 动画效果和过渡效果已优化
+- [x] 全局异常捕获和优雅退出已实现
+- [x] requirements.txt 依赖清单已编写

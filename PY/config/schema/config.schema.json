@@ -1,0 +1,139 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Application Configuration",
+  "type": "object",
+  "required": ["config_version", "buy_params", "mail_params", "recognition", "device", "timing", "logging"],
+  "properties": {
+    "config_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Configuration schema version for migration"
+    },
+    "buy_params": {
+      "type": "object",
+      "properties": {
+        "user_price": { "type": "number", "minimum": 0 },
+        "price_coefficient": { "type": "integer", "minimum": 1 },
+        "min_price": { "type": "integer", "minimum": 0 },
+        "max_mail_count": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["user_price", "max_mail_count"]
+    },
+    "mail_params": {
+      "type": "object",
+      "properties": {
+        "mail_count_file": { "type": "string" },
+        "auto_increment": { "type": "boolean" }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "start_time": { "type": "string" }
+      }
+    },
+    "recognition": {
+      "type": "object",
+      "properties": {
+        "template_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "template_dir": { "type": "string" },
+        "ocr_gpu": { "type": "boolean" }
+      }
+    },
+    "ocr_regions": {
+      "type": "object",
+      "properties": {
+        "price_region": { "$ref": "#/$defs/region" },
+        "button_region": { "$ref": "#/$defs/region" }
+      }
+    },
+    "wifi_control": {
+      "type": "object",
+      "properties": {
+        "enable_cmd": { "type": "string" },
+        "disable_cmd": { "type": "string" }
+      }
+    },
+    "device": {
+      "type": "object",
+      "properties": {
+        "game_package": { "type": "string" },
+        "base_resolution": {
+          "type": "object",
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "scrcpy_server_path": { "type": "string" }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "properties": {
+        "default_wait": { "type": "number", "minimum": 0 },
+        "screenshot_wait": { "type": "number", "minimum": 0 },
+        "game_start_wait": { "type": "number", "minimum": 0 },
+        "match_wait": { "type": "number", "minimum": 0 }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "log_file": { "type": "string" },
+        "log_level": { "type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"] },
+        "max_log_size_mb": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "properties": {
+        "theme": { "type": "string" },
+        "floating_window_opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "object",
+          "properties": {
+            "default_policy": { "type": "string", "enum": ["retry", "backoff", "skip", "fail", "abort"] },
+            "max_retries": { "type": "integer", "minimum": 0 },
+            "retry_delay": { "type": "number", "minimum": 0 },
+            "backoff_base": { "type": "number", "minimum": 1 },
+            "backoff_max": { "type": "number", "minimum": 0 },
+            "category_overrides": { "type": "object" }
+          }
+        }
+      }
+    },
+    "coordinate": {
+      "type": "object",
+      "properties": {
+        "auto_scale": { "type": "boolean" },
+        "warn_on_mismatch": { "type": "boolean" }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "endpoint": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "region": {
+      "type": "object",
+      "properties": {
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "right": { "type": "integer" },
+        "bottom": { "type": "integer" }
+      },
+      "required": ["left", "top", "right", "bottom"]
+    }
+  }
+}

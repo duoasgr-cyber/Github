@@ -1,0 +1,87 @@
+import os
+import time
+import subprocess
+import cv2
+
+# 本地模块
+import e_adb_png_path
+
+from device_manager import DeviceManager  # 导入设备管理器
+
+def adb_command_basic(command):
+    """
+    执行ADB命令。自动使用在device_manager中选定的设备。
+    如果未选择设备，命令将执行失败。
+    """
+    device_serial = DeviceManager.get_current_device()
+    if device_serial:
+        full_command = f"adb -s {device_serial} {command}"
+    else:
+        # 如果没有选定设备，可以在这里添加逻辑，例如自动选择第一个设备
+        # 但更推荐在主程序中明确选择。这里我们先报错。
+        print("错误: 未选定ADB设备。请先运行设备选择。")
+        # 或者，选择不指定设备，这可能在多设备时出错
+        full_command = f"adb {command}"
+        print(f"警告: 将在无设备指定情况下执行命令: {full_command}")
+
+    # 打印命令以便调试（可选）
+    # print(f"执行: {full_command}")
+    try:
+        subprocess.run(full_command, shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"ADB命令执行失败: {e}")
+        # 根据您的需求决定是否抛出异常
+        # raise
+
+def adb_click(x, y):
+    """点击屏幕"""
+    subprocess.run(f"adb shell input tap {x} {y}", shell=True)
+
+def jyh():
+    frist()
+    time.sleep(5) # 等待子弹卖出
+    second()
+
+
+def get_you():
+    adb_command_basic("shell input tap 2564 49")  # 点开邮件
+    time.sleep(1.5)
+    adb_command_basic("shell input tap 180 180")  # 点开系统的页面，而不是停在交易行零哈弗币的页面
+    time.sleep(5.0)
+    adb_command_basic("shell input tap 2555 1145")  # 点领取
+    time.sleep(5)
+    adb_command_basic("shell input tap 1170 1000")  # 点取消重连
+    time.sleep(1.0)
+    adb_command_basic("shell input tap 50 50")  # 点返回
+    time.sleep(1.0)
+
+def sale(n):
+    for i in range(1,n):
+        get_you()
+        jyh()
+        print(f"第{i}次运行售卖")
+
+def frist():
+    adb_command_basic("shell input tap 640 1180") # 交易行
+    time.sleep(1)
+    adb_command_basic("shell input tap 170 310")  # 出售
+    time.sleep(1)
+    adb_command_basic('shell input swipe 2000 1000 2000 200 100')  # 滑到最下面
+    time.sleep(1)
+    adb_command_basic('shell input swipe 2000 1000 2000 200 100')  # 滑到最下面
+    time.sleep(2)
+    adb_command_basic("shell input tap 1476 1040")  # 点击左下角子弹
+    time.sleep(2)
+    adb_command_basic("shell input tap 2014 680")  # 点击中段位置
+    time.sleep(1)
+    adb_command_basic("shell input tap 2014 1000")  # 点击上架
+
+def second():
+    adb_command_basic("shell input tap 1700 1040") # 点击下面中间子弹
+    time.sleep(1)
+    adb_command_basic("shell input tap 2268 682") # 点击后段位置
+    time.sleep(1)
+    adb_command_basic("shell input tap 2014 1000") # 点击上架
+    time.sleep(1)
+    adb_command_basic("shell input keyevent 4") # 返回
+    time.sleep(1)

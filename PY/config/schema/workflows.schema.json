@@ -1,0 +1,99 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Workflows Configuration",
+  "type": "object",
+  "required": ["workflows"],
+  "properties": {
+    "workflows": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workflow"
+      }
+    }
+  },
+  "$defs": {
+    "workflow": {
+      "type": "object",
+      "required": ["steps"],
+      "properties": {
+        "description": { "type": "string" },
+        "device_resolution": {
+          "type": "object",
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tap", "long_press", "swipe", "keyevent", "wait", "wifi",
+            "force_stop", "launch", "screenshot", "pull_file", "delete_file",
+            "check_image", "ocr_region", "tap_point", "call_workflow",
+            "condition", "loop", "input_text", "variable", "adb_command",
+            "expression"
+          ]
+        },
+        "enabled": { "type": "boolean" },
+        "display_name": { "type": "string" },
+        "comment": { "type": "string" },
+        "on_fail": { "type": "string", "enum": ["retry", "backoff", "skip", "fail", "abort", "stop", "recover"] },
+        "retry_count": { "type": "integer", "minimum": 0 },
+        "wait_after": { "type": "number", "minimum": 0 },
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "x1": { "type": "integer" },
+        "y1": { "type": "integer" },
+        "x2": { "type": "integer" },
+        "y2": { "type": "integer" },
+        "duration": { "type": "number", "minimum": 0 },
+        "key": { "type": "string" },
+        "seconds": { "type": "number", "minimum": 0 },
+        "action": { "type": "string" },
+        "package": { "type": "string" },
+        "save_path": { "type": "string" },
+        "remote": { "type": "string" },
+        "local": { "type": "string" },
+        "path": { "type": "string" },
+        "template": { "type": "string" },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "region": { "$ref": "#/$defs/region" },
+        "workflow": { "type": "string" },
+        "check": { "type": "object" },
+        "then_steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "else_steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "max_count": { "type": "integer", "minimum": 0 },
+        "condition": { "type": "object" },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "text": { "type": "string" },
+        "var_name": { "type": "string" },
+        "var_type": { "type": "string", "enum": ["bool", "int", "string"] },
+        "var_value": { "type": "string" },
+        "adb_cmd": { "type": "string" },
+        "assign_variable": { "type": "string" },
+        "recover_workflow": { "type": "string" },
+        "expression": { "type": "string" },
+        "snippet_id": { "type": "string" }
+      }
+    },
+    "region": {
+      "type": "object",
+      "properties": {
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "right": { "type": "integer" },
+        "bottom": { "type": "integer" }
+      }
+    }
+  }
+}

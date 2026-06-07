@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "muapi-url-to-design": {
+      "source": "samuraigpt/generative-media-skills",
+      "sourceType": "github",
+      "skillPath": "library/visual/url-to-design/SKILL.md",
+      "computedHash": "5a540cd04013160cc676722f812af1c3c819fe8ec6bddeca4ba733d585349793"
+    }
+  }
+}
