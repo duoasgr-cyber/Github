@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 import unittest.mock
 import tempfile
 import os
@@ -76,7 +76,7 @@ class TestAdbCore(unittest.TestCase):
             returncode=1, stdout="", stderr="error: no devices"
         )
         with self.assertRaises(AdbError):
-            self.adb.execute("shell input tap 100 200")
+            self.adb.execute(["shell", "input", "tap", "100", "200"])
 
     @unittest.mock.patch("core.adb_core.subprocess.run")
     def test_tap_command(self, mock_run):
@@ -87,7 +87,9 @@ class TestAdbCore(unittest.TestCase):
         self.adb.tap(100, 200)
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        self.assertEqual(call_args, "adb -s test_device shell input tap 100 200")
+        self.assertEqual(call_args, ["adb", "-s", "test_device", "shell", "input", "tap", "100", "200"])
+        # shell=False
+        self.assertFalse(mock_run.call_args[1].get("shell", True))
 
     @unittest.mock.patch("core.adb_core.subprocess.run")
     def test_wifi_enable(self, mock_run):
@@ -98,7 +100,7 @@ class TestAdbCore(unittest.TestCase):
         self.adb.wifi_enable()
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        self.assertEqual(call_args, "adb -s test_device shell svc wifi enable")
+        self.assertEqual(call_args, ["adb", "-s", "test_device", "shell", "svc", "wifi", "enable"])
 
 
 class TestStepExecutor(unittest.TestCase):
@@ -111,6 +113,7 @@ class TestStepExecutor(unittest.TestCase):
 
     def setUp(self):
         self.config_manager = unittest.mock.MagicMock()
+        self.config_manager.get_config.return_value = {}
         self.adb_core = unittest.mock.MagicMock()
         self.screen_capture = unittest.mock.MagicMock()
         self.ocr_engine = unittest.mock.MagicMock()
@@ -147,6 +150,18 @@ class TestStepExecutor(unittest.TestCase):
         }
         self.device_manager.get_device_resolution.return_value = (1920, 900)
         self.adb_core.tap.return_value = True
+        def _cfg(key, default=None):
+            if key == "coordinate":
+                return {"auto_scale": True, "warn_on_mismatch": True}
+            if key == "execution.policy":
+                return {}
+            return default if default is not None else {}
+        self.config_manager.get_config.side_effect = _cfg
+        self.executor = StepExecutor(
+            self.config_manager, self.adb_core,
+            self.screen_capture, self.ocr_engine,
+            self.device_manager
+        )
         self.executor.execute_step("test_wf", 0)
         expected_x = int(round(1200 * 1920 / 2400))
         expected_y = int(round(540 * 900 / 1080))
@@ -164,6 +179,207 @@ class TestStepExecutor(unittest.TestCase):
         result = self.executor.execute_workflow("test_wf")
         self.assertTrue(result)
 
+
+
+    @unittest.mock.patch('core.step_executor.time.sleep')
+    def test_tap_point_uses_scale_coord(self, mock_sleep):
+        """tap_point 应像 tap 一样调用 _scale_coord()"""
+        self.config_manager.get_workflow.return_value = {
+            "device_resolution": {"width": 2400, "height": 1080},
+            "steps": [{"type": "tap_point", "x": 100, "y": 200}]
+        }
+        self.device_manager.get_device_resolution.return_value = (1920, 900)
+        self.adb_core.tap.return_value = True
+        def _cfg(key, default=None):
+            if key == 'coordinate':
+                return {"auto_scale": True, "warn_on_mismatch": True}
+            if key == 'execution.policy':
+                return {}
+            return default if default is not None else {}
+        self.config_manager.get_config.side_effect = _cfg
+        self.executor = StepExecutor(
+            self.config_manager, self.adb_core,
+            self.screen_capture, self.ocr_engine,
+            self.device_manager
+        )
+        self.executor.execute_step('test_wf', 0)
+        expected_x = int(round(100 * 1920 / 2400))
+        expected_y = int(round(200 * 900 / 1080))
+        self.adb_core.tap.assert_called_once_with(expected_x, expected_y)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_adb_command_safe(self, mock_sleep):
+        """adb_command with valid shell command should succeed."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "adb_command", "adb_cmd": "wm size"}]
+        }
+        self.adb_core.shell.return_value = "Physical size: 2400x1080"
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.adb_core.shell.assert_called_once_with("wm size")
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_adb_command_injection_blocked(self, mock_sleep):
+        """adb_command with injection characters should be rejected."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "adb_command", "adb_cmd": "wm size; rm -rf /"}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertFalse(result)
+        self.adb_core.shell.assert_not_called()
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_adb_command_pipe_blocked(self, mock_sleep):
+        """adb_command with pipe should be rejected."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "adb_command", "adb_cmd": "cat /proc/cpuinfo | grep model"}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertFalse(result)
+        self.adb_core.shell.assert_not_called()
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_adb_command_too_long(self, mock_sleep):
+        """adb_command exceeding max length should be rejected."""
+        long_cmd = "wm size " * 100
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "adb_command", "adb_cmd": long_cmd}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertFalse(result)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_adb_command_assign_variable(self, mock_sleep):
+        """adb_command with assign_variable should store result."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "adb_command", "adb_cmd": "wm size", "assign_variable": "resolution"}]
+        }
+        self.adb_core.shell.return_value = "Physical size: 2400x1080"
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.assertEqual(self.executor.get_variable("resolution"), "Physical size: 2400x1080")
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_expression_step(self, mock_sleep):
+        """expression step should evaluate and store result."""
+        self.executor.set_variable("price", 100)
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "expression", "expression": "price * 2 + 10", "assign_variable": "total"}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.assertEqual(self.executor.get_variable("total"), 210)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_expression_invalid(self, mock_sleep):
+        """expression step with invalid expression should fail."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "expression", "expression": "import os"}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertFalse(result)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_variable_step(self, mock_sleep):
+        """variable step should set a variable."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "variable", "var_name": "counter", "var_type": "int", "var_value": "42"}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.assertEqual(self.executor.get_variable("counter"), 42)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_condition_step_true(self, mock_sleep):
+        """condition step should execute then_steps when condition is true."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{
+                "type": "condition",
+                "check": {"type": "image_found", "template": "test.jpg", "threshold": 0.5},
+                "then_steps": [{"type": "wait", "seconds": 0.1}],
+                "else_steps": [],
+            }]
+        }
+        with unittest.mock.patch.object(self.executor, "_check_image_found", return_value=True):
+            result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_condition_step_false(self, mock_sleep):
+        """condition step should execute else_steps when condition is false."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{
+                "type": "condition",
+                "check": {"type": "image_found", "template": "test.jpg", "threshold": 0.99},
+                "then_steps": [],
+                "else_steps": [{"type": "wait", "seconds": 0.1}],
+            }]
+        }
+        with unittest.mock.patch.object(self.executor, "_check_image_found", return_value=False):
+            result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_loop_step_count(self, mock_sleep):
+        """loop step should execute inner steps N times."""
+        call_count = [0]
+        original_wait = self.executor._step_wait
+        def counting_wait(step):
+            call_count[0] += 1
+            return True
+        self.executor._step_wait = counting_wait
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "loop", "max_count": 3, "steps": [{"type": "wait", "seconds": 0.1}]}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.assertEqual(call_count[0], 3)
+        self.executor._step_wait = original_wait
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_loop_step_zero_count(self, mock_sleep):
+        """loop step with max_count=0 should not execute."""
+        call_count = [0]
+        original_wait = self.executor._step_wait
+        def counting_wait(step):
+            call_count[0] += 1
+            return True
+        self.executor._step_wait = counting_wait
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "loop", "max_count": 0, "steps": [{"type": "wait", "seconds": 0.1}]}]
+        }
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.assertEqual(call_count[0], 0)
+        self.executor._step_wait = original_wait
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_loop_step_inner_failure(self, mock_sleep):
+        """loop step should fail if inner step fails."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "loop", "max_count": 5, "steps": [{
+                "type": "wait", "seconds": 0.1
+            }]}]
+        }
+        call_count = [0]
+        def fail_after_two(step):
+            call_count[0] += 1
+            return call_count[0] <= 2
+        with unittest.mock.patch.object(self.executor, "_step_wait", side_effect=fail_after_two):
+            result = self.executor.execute_step("test_wf", 0)
+        self.assertFalse(result)
+        self.assertGreaterEqual(call_count[0], 3)
+
+    @unittest.mock.patch("core.step_executor.time.sleep")
+    def test_execute_input_text_step(self, mock_sleep):
+        """input_text step should call adb_core.input_text."""
+        self.config_manager.get_workflow.return_value = {
+            "steps": [{"type": "input_text", "text": "hello"}]
+        }
+        self.adb_core.input_text.return_value = True
+        result = self.executor.execute_step("test_wf", 0)
+        self.assertTrue(result)
+        self.adb_core.input_text.assert_called_once_with("hello")
 
 class TestOcrEngine(unittest.TestCase):
     def setUp(self):

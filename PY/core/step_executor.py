@@ -3,6 +3,7 @@ import os
 import time
 import threading
 import re
+from functools import lru_cache
 import cv2
 import numpy as np
 from typing import Optional, Tuple
@@ -14,6 +15,15 @@ from core.error_policy import (
     classify_error, classify_step_failure, ErrorPolicy
 )
 from core.expression_eval import step_expression
+# --- Security: ADB command injection guard ---
+_INJECTION_PATTERN = re.compile(r'[;&|$(){}!#]')
+_MAX_ADB_CMD_LENGTH = 512
+@lru_cache(maxsize=32)
+def _load_template_cached(template_path: str):
+    """Cache-loaded template images to avoid repeated disk reads."""
+    img = cv2.imread(template_path, cv2.IMREAD_COLOR)
+    return img
+
 
 logger = logging.getLogger(__name__)
 
@@ -457,6 +467,9 @@ class StepExecutor(QObject):
 
     def _step_keyevent(self, step: dict) -> bool:
         key = step["key"]
+        if not re.match(r'^[a-zA-Z0-9_]+$', str(key)):
+            logger.error("非法 keyevent: %s", key)
+            return False
         return self._adb_core.keyevent(key)
 
     def _step_wait(self, step: dict) -> bool:
@@ -477,6 +490,9 @@ class StepExecutor(QObject):
 
     def _step_force_stop(self, step: dict) -> bool:
         package = step["package"]
+        if not re.match(r'^[a-zA-Z0-9._]+$', package):
+            logger.error("非法包名: %s", package)
+            return False
         result = self._adb_core.force_stop(package)
         wait_after = step.get("wait_after", 0)
         if wait_after > 0:
@@ -485,6 +501,9 @@ class StepExecutor(QObject):
 
     def _step_launch(self, step: dict) -> bool:
         package = step["package"]
+        if not re.match(r'^[a-zA-Z0-9._]+$', package):
+            logger.error("非法包名: %s", package)
+            return False
         result = self._adb_core.launch(package)
         wait_after = step.get("wait_after", 0)
         if wait_after > 0:
@@ -522,7 +541,7 @@ class StepExecutor(QObject):
             self.check_image_result.emit(False)
             return False
 
-        template = cv2.imread(template_path, cv2.IMREAD_COLOR)
+        template = _load_template_cached(template_path)
         if template is None:
             logger.error("Failed to load template: %s", template_path)
             self._last_check_result = False
@@ -569,8 +588,7 @@ class StepExecutor(QObject):
         return True
 
     def _step_tap_point(self, step: dict) -> bool:
-        x = step["x"]
-        y = step["y"]
+        x, y = self._scale_coord(step["x"], step["y"])
         result = self._adb_core.tap(x, y)
         wait_after = step.get("wait_after", 0)
         if wait_after > 0:
@@ -613,7 +631,7 @@ class StepExecutor(QObject):
             if self._stop_requested:
                 return False
 
-            if max_count and max_count > 0 and iteration >= max_count:
+            if max_count >= 0 and iteration >= max_count:
                 logger.info("Loop reached max count: %d", max_count)
                 break
 
@@ -636,6 +654,10 @@ class StepExecutor(QObject):
 
     def _step_input_text(self, step: dict) -> bool:
         text = step.get("text", "")
+        # ADB input text 不支持部分特殊字符，对 shell 元字符进行转义
+        if _INJECTION_PATTERN.search(text):
+            logger.warning("input_text 包含潜在危险字符，进行转义: %s", text[:50])
+            text = text.replace("\\", "\\\\").replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
         return self._adb_core.input_text(text)
 
     def _step_variable(self, step: dict) -> bool:
@@ -659,9 +681,16 @@ class StepExecutor(QObject):
             return False
 
     def _step_adb_command(self, step: dict) -> bool:
+        """Execute an ADB shell command with injection protection."""
         cmd = step.get("adb_cmd", "")
         if not cmd:
             logger.error("adb_command step missing adb_cmd")
+            return False
+        if len(cmd) > _MAX_ADB_CMD_LENGTH:
+            logger.error("adb_command too long (%d > %d), rejected", len(cmd), _MAX_ADB_CMD_LENGTH)
+            return False
+        if _INJECTION_PATTERN.search(cmd):
+            logger.error("adb_command rejected (injection risk): %s", cmd)
             return False
         try:
             result = self._adb_core.shell(cmd)
@@ -674,6 +703,7 @@ class StepExecutor(QObject):
         except Exception as e:
             logger.error("ADB command failed: %s", e)
             return False
+
 
     def _step_expression(self, step: dict) -> bool:
         """Execute an expression step using the safe evaluator."""
@@ -712,7 +742,7 @@ class StepExecutor(QObject):
         else:
             template_path = os.path.join(template_dir, template_name)
 
-        template = cv2.imread(template_path, cv2.IMREAD_COLOR)
+        template = _load_template_cached(template_path)
         if template is None:
             logger.error("Failed to load template: %s", template_path)
             return False
@@ -798,3 +828,5 @@ class StepExecutor(QObject):
             sleep_time = min(0.1, seconds - elapsed)
             time.sleep(sleep_time)
             elapsed += sleep_time
+
+

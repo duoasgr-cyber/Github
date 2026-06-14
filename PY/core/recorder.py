@@ -133,9 +133,9 @@ class Recorder(QObject):
 
         try:
             import subprocess
-            cmd = f"adb -s {device} shell getevent -lt"
             proc = subprocess.Popen(
-                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                ["adb", "-s", device, "shell", "getevent", "-lt"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             )
 
