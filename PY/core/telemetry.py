@@ -10,6 +10,8 @@ import time
 import threading
 import traceback
 from datetime import datetime, timezone
+import urllib.request
+import urllib.error
 from typing import Optional, Dict, Any, List
 from collections import defaultdict
 
@@ -175,6 +177,67 @@ class Telemetry:
         except Exception as e:
             logger.error("Failed to export telemetry: %s", e)
             return False
+
+
+    def report_to_server(self) -> bool:
+        """Send telemetry payload to the configured endpoint.
+
+        The endpoint URL is read from config key ``telemetry.endpoint``.
+        Data is POSTed as JSON.  Returns True on success, False on any
+        error (network, config, etc.).  Never raises.
+        """
+        if not self.enabled:
+            return False
+
+        endpoint = ""
+        if self._config_manager:
+            endpoint = self._config_manager.get_config("telemetry.endpoint", "")
+        if not endpoint:
+            logger.debug("No telemetry endpoint configured, skipping report")
+            return False
+
+        with self._lock:
+            payload = {
+                "session_stats": self.get_session_stats(),
+                "events": [e.to_dict() for e in self._events[-200:]],
+                "crash_reports": self._crash_reports[-10:],
+            }
+
+        try:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status = resp.status
+                logger.info("Telemetry reported to %s (HTTP %d)", endpoint, status)
+                return 200 <= status < 300
+        except urllib.error.URLError as e:
+            logger.warning("Telemetry report failed: %s", e)
+            return False
+        except Exception as e:
+            logger.warning("Telemetry report error: %s", e)
+            return False
+
+    def schedule_periodic_report(self, interval_seconds: int = 300):
+        """Start a background thread that calls report_to_server periodically.
+
+        Args:
+            interval_seconds: Seconds between reports (default 300 = 5 min).
+        """
+        def _periodic():
+            while True:
+                time.sleep(interval_seconds)
+                try:
+                    self.report_to_server()
+                except Exception as e:
+                    logger.debug("定期遥测报告失败: %s", e)
+        t = threading.Thread(target=_periodic, daemon=True, name="telemetry-report")
+        t.start()
+        logger.info("Telemetry periodic reporter started (every %ds)", interval_seconds)
 
     def clear(self):
         with self._lock:
