@@ -1,0 +1,9 @@
+- [x] `_detect_hw_accel()` 方法能正确检测 CUDA/DXVA2/QSV 可用性，无 GPU 时返回 None
+- [x] ffmpeg 启动命令包含正确的硬件解码参数（CUDA/DXVA2/QSV 按检测结果选择）
+- [x] ffmpeg 启动命令包含低延迟参数（`-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0`）
+- [x] 无硬件加速时回退到软解码，投屏正常工作
+- [x] 跳过过期帧逻辑生效：帧堆积时只保留最新帧，不累积延迟
+- [x] scrcpy server 启动参数包含 `video_bit_rate=8000000`
+- [x] `update_frame()` 不再调用 `rgbSwapped()`，画面颜色正确
+- [ ] 投屏帧率相比优化前有明显提升（目标 40fps+，需连接设备实测）
+- [ ] CPU 占用相比优化前有明显降低（需连接设备实测）

@@ -3,7 +3,19 @@ import logging
 import re
 import shlex
 import os
+import sys
 from typing import Optional, List, Tuple
+
+# Windows 下隐藏子进程控制台窗口
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+# STARTUPINFO: 双重保障，防止 Windows 上子进程闪现控制台窗口
+if sys.platform == "win32":
+    _STARTUPINFO = subprocess.STARTUPINFO()
+    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+else:
+    _STARTUPINFO = None
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +88,9 @@ class AdbCore:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                shell=False
+                shell=False,
+                creationflags=_NO_WINDOW,
+                startupinfo=_STARTUPINFO
             )
             logger.debug("命令结果 - returncode=%d, stdout=%s, stderr=%s",
                          result.returncode, result.stdout.strip(), result.stderr.strip())
@@ -132,12 +146,23 @@ class AdbCore:
             logger.error("按键事件失败: %s", key)
             return False
 
+    # ADB input text 需要转义的字符
+    _INPUT_TEXT_SPECIAL = re.compile(r'[&;|`$(){}<>\\!#*?~"\']')
+
     def input_text(self, text: str, device: str = None) -> bool:
+        if not text:
+            return False
+        # 检查是否包含危险 shell 元字符
+        if self._INPUT_TEXT_SPECIAL.search(text):
+            logger.error("输入文本包含危险字符，已拒绝: %s", text[:50])
+            return False
+        # ADB input text 用 %s 表示空格
+        safe_text = text.replace(' ', '%s')
         try:
-            self.execute(["shell", "input", "text", str(text)], device=device)
+            self.execute(["shell", "input", "text", safe_text], device=device)
             return True
         except AdbError:
-            logger.error("文本输入失败: %s", text)
+            logger.error("文本输入失败: %s", text[:50])
             return False
 
     def screenshot(self, remote_path: str, device: str = None) -> bool:
@@ -291,7 +316,9 @@ class AdbCore:
                 cmd_parts,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                creationflags=_NO_WINDOW,
+                startupinfo=_STARTUPINFO
             )
             return proc
         except Exception as e:

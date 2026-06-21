@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import threading
 import logging
@@ -118,6 +118,7 @@ class ConfigManager:
         self._config = None  # type: Optional[dict]
         self._workflows = None  # type: Optional[dict]
         self._lock = threading.Lock()
+        self._dirty = False  # 标记是否有未写入磁盘的配置变更
 
     def _load_json_file(self, file_path: str, default: dict) -> dict:
         if not os.path.exists(file_path):
@@ -190,7 +191,7 @@ class ConfigManager:
         with self._lock:
             config = self._ensure_config()
             self._resolve_set(config, key_path, value)
-            self._atomic_write(self._config_path, config)
+            self._dirty = True
 
     def get_workflow(self, name: str) -> dict:
         with self._lock:
@@ -229,8 +230,11 @@ class ConfigManager:
 
     def save_config(self) -> None:
         with self._lock:
+            if not self._dirty:
+                return
             config = self._ensure_config()
             self._atomic_write(self._config_path, config)
+            self._dirty = False
 
     def save_workflows(self) -> None:
         with self._lock:

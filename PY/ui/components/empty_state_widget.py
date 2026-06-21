@@ -1,11 +1,11 @@
-﻿"""Empty state and blocking reason widgets for unified UX.
+"""Empty state and blocking reason widgets for unified UX.
 
 Provides consistent empty states and blocking indicators across all panels.
 """
 from enum import Enum
 from typing import Optional
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect
 from PyQt5.QtGui import QFont, QPainter, QColor
 
 
@@ -27,59 +27,69 @@ class BlockingReason(Enum):
 BLOCKING_MESSAGES = {
     BlockingReason.NO_DEVICE: {
         "icon": "📱",
-        "title": "No Device Connected",
-        "hint": "Connect a device via USB and select it from the sidebar or Device Management panel.",
+        "title": "未连接设备",
+        "hint": "通过 USB 连接设备后从侧边栏或设备管理面板选择。",
+        "action_text": "前往设备管理",
     },
     BlockingReason.NO_WORKFLOW: {
         "icon": "📋",
-        "title": "No Workflow Selected",
-        "hint": "Select a workflow from the sidebar or create a new one in the Workflow Editor.",
+        "title": "未选择工作流",
+        "hint": "从侧边栏选择工作流，或在工作流编辑器中创建新工作流。",
+        "action_text": "创建工作流",
     },
     BlockingReason.NO_OCR: {
         "icon": "🔍",
-        "title": "OCR Not Available",
-        "hint": "EasyOCR models are not loaded. OCR recognition features are disabled.",
+        "title": "OCR 不可用",
+        "hint": "EasyOCR 模型未加载，OCR 识别功能已禁用。",
+        "action_text": "",
     },
     BlockingReason.NO_SCREEN_CAPTURE: {
         "icon": "📺",
-        "title": "Screen Capture Not Available",
-        "hint": "Start screen capture from a connected device to use image recognition features.",
+        "title": "屏幕采集不可用",
+        "hint": "从已连接设备启动屏幕采集以使用图像识别功能。",
+        "action_text": "",
     },
     BlockingReason.DEVICE_DISCONNECTED: {
         "icon": "🔌",
-        "title": "Device Disconnected",
-        "hint": "The connected device has been disconnected. Reconnect and try again.",
+        "title": "设备已断开",
+        "hint": "已连接的设备已断开，请重新连接后再试。",
+        "action_text": "重新连接",
     },
     BlockingReason.OCR_LOADING: {
         "icon": "⏳",
-        "title": "Loading OCR Models...",
-        "hint": "OCR models are loading. This may take 10-30 seconds on first use.",
+        "title": "正在加载 OCR 模型...",
+        "hint": "OCR 模型正在加载，首次使用可能需要 10-30 秒。",
+        "action_text": "",
     },
     BlockingReason.WORKFLOW_EMPTY: {
         "icon": "📝",
-        "title": "Workflow Has No Steps",
-        "hint": "Add steps to this workflow using the Workflow Editor before running.",
+        "title": "工作流无步骤",
+        "hint": "运行前请先在工作流编辑器中添加步骤。",
+        "action_text": "添加步骤",
     },
     BlockingReason.SCRCPY_FAILED: {
         "icon": "⚠️",
-        "title": "Screen Capture Failed",
-        "hint": "Could not start screen capture. Check device connection and scrcpy-server.jar.",
+        "title": "屏幕采集失败",
+        "hint": "无法启动屏幕采集，请检查设备连接和 scrcpy-server.jar。",
+        "action_text": "",
     },
     BlockingReason.ADB_NOT_FOUND: {
         "icon": "❌",
-        "title": "ADB Not Found",
-        "hint": "Install Android SDK Platform Tools and add adb to your system PATH.",
+        "title": "未找到 ADB",
+        "hint": "请安装 Android SDK Platform Tools 并将 adb 添加到系统 PATH。",
+        "action_text": "",
     },
     BlockingReason.CONFIG_MISSING: {
         "icon": "⚙️",
-        "title": "Configuration Missing",
-        "hint": "Required configuration files are missing. They will be created from defaults.",
+        "title": "配置缺失",
+        "hint": "必需的配置文件缺失，将从默认值创建。",
+        "action_text": "",
     },
 }
 
 
 class EmptyStateWidget(QWidget):
-    """Empty state placeholder with icon text and message."""
+    """空状态占位组件 — 支持图标、消息、提示和操作按钮。"""
 
     action_clicked = pyqtSignal()
 
@@ -90,7 +100,36 @@ class EmptyStateWidget(QWidget):
         self._hint = hint
         self._action_text = action_text
         self._blocking_reason: Optional[BlockingReason] = None
+        self._action_button: Optional[QPushButton] = None
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self._rebuild_layout()
+
+    def _rebuild_layout(self):
+        """重建布局（当状态改变时调用）。"""
+        # 清除现有子控件
+        if hasattr(self, '_layout'):
+            while self._layout.count():
+                item = self._layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+        else:
+            self._layout = QVBoxLayout(self)
+            self._layout.setAlignment(Qt.AlignCenter)
+            self._layout.setSpacing(8)
+
+        # 操作按钮
+        if self._action_text:
+            self._action_button = QPushButton(self._action_text)
+            self._action_button.setObjectName("emptyStateAction")
+            self._action_button.setProperty("class", "primary")
+            self._action_button.setFixedHeight(32)
+            self._action_button.setCursor(Qt.PointingHandCursor)
+            self._action_button.clicked.connect(self.action_clicked.emit)
+            self._action_button.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            self._layout.addWidget(self._action_button, alignment=Qt.AlignCenter)
+        else:
+            self._action_button = None
 
     def set_state(self, icon="", message="", hint="", action_text=""):
         self._icon_text = icon
@@ -98,6 +137,7 @@ class EmptyStateWidget(QWidget):
         self._hint = hint
         self._action_text = action_text
         self._blocking_reason = None
+        self._rebuild_layout()
         self.update()
 
     def set_blocking(self, reason: BlockingReason, custom_message: str = "", custom_hint: str = ""):
@@ -105,8 +145,10 @@ class EmptyStateWidget(QWidget):
         self._blocking_reason = reason
         info = BLOCKING_MESSAGES.get(reason, {})
         self._icon_text = info.get("icon", "⚠️")
-        self._message = custom_message or info.get("title", "Unknown Issue")
+        self._message = custom_message or info.get("title", "未知问题")
         self._hint = custom_hint or info.get("hint", "")
+        self._action_text = info.get("action_text", "")
+        self._rebuild_layout()
         self.update()
 
     def clear_blocking(self):
@@ -114,6 +156,8 @@ class EmptyStateWidget(QWidget):
         self._icon_text = ""
         self._message = ""
         self._hint = ""
+        self._action_text = ""
+        self._rebuild_layout()
         self.update()
 
     def get_blocking_reason(self) -> Optional[BlockingReason]:
@@ -166,7 +210,7 @@ class EmptyStateWidget(QWidget):
 class LoadingOverlay(QWidget):
     """Semi-transparent loading overlay with spinner text."""
 
-    def __init__(self, text="Loading...", parent=None):
+    def __init__(self, text="加载中...", parent=None):
         super().__init__(parent)
         self._text = text
         self._angle = 0

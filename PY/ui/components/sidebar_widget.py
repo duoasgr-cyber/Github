@@ -23,6 +23,7 @@ class SidebarWidget(QWidget):
     manage_requested = pyqtSignal()
     device_selected = pyqtSignal(str, str)
     rename_requested = pyqtSignal(str, str)
+    open_mirror_requested = pyqtSignal(str)  # 新增：打开高清投屏
 
     EXPANDED_WIDTH = 260
     COLLAPSED_WIDTH = 48
@@ -44,7 +45,7 @@ class SidebarWidget(QWidget):
         if self._collapsed:
             self._apply_collapsed_state(animated=False)
 
-    # ── UI 构建 ──────────────────────────────────────────────
+    # ---- UI 构建 -----------------------------------------------------------
 
     def _init_ui(self):
         self.setObjectName("sidebar")
@@ -106,12 +107,17 @@ class SidebarWidget(QWidget):
     def _connect_signals(self):
         self._device_bind.device_selected.connect(self.device_selected.emit)
         self._device_bind.rename_requested.connect(self.rename_requested.emit)
+        self._device_bind.open_mirror_requested.connect(self.open_mirror_requested.emit)
         self._workflow_switcher.workflow_changed.connect(self._on_workflow_changed)
         self._workflow_switcher.manage_requested.connect(self.manage_requested.emit)
         self._step_preview.step_clicked.connect(self.step_clicked.emit)
         self._step_preview.step_order_changed.connect(self.step_order_changed.emit)
 
-    # ── 公开接口 ─────────────────────────────────────────────
+    # ---- 公开接口 -----------------------------------------------------------
+
+    def set_mirror_active(self, active: bool):
+        """更新投屏按钮状态。"""
+        self._device_bind.set_mirror_active(active)
 
     @property
     def device_bind(self):
@@ -153,7 +159,7 @@ class SidebarWidget(QWidget):
         wf = self._workflow_switcher.current_workflow()
         self._mini_step_count.setToolTip(f"方案: {wf or '无'}")
 
-    # ── 内部逻辑 ─────────────────────────────────────────────
+    # ---- 内部逻辑 -----------------------------------------------------------
 
     def _on_workflow_changed(self, name):
         self.update_mini_info()
@@ -203,7 +209,7 @@ class SidebarWidget(QWidget):
         anim.start()
         self._animation = anim  # 保持引用，防止被 GC
 
-    # ── 状态持久化 ───────────────────────────────────────────
+    # ---- 状态持久化 ---------------------------------------------------------
 
     def _load_state(self):
         if not self._ui_state_path:

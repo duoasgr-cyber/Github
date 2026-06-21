@@ -1,0 +1,7 @@
+- [x] `core/screen_capture.py` 的 PyAV 解码器已设置 `LOW_DELAY` 标志
+- [x] scrcpy server 启动命令包含 `max_fps=60`
+- [x] scrcpy server 启动命令包含 `video_codec_options=latency=1,priority=0`
+- [x] `embedded_mirror_widget.py` 的帧更新定时器间隔为 8ms
+- [x] `tests/test_screen_capture.py` 全部通过
+- [x] screencap 回退逻辑未被破坏
+- [x] 代码风格检查（black / isort）通过

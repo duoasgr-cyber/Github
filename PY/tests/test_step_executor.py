@@ -163,7 +163,7 @@ class TestStepCheckImage(unittest.TestCase):
         template = frame[10:20, 10:20].copy()
         capture.get_current_frame.return_value = frame
 
-        with unittest.mock.patch("core.step_executor._load_template_cached", return_value=template), \
+        with unittest.mock.patch("core.step_executor.StepExecutor._load_template", return_value=template), \
              unittest.mock.patch("cv2.matchTemplate") as mock_match, \
              unittest.mock.patch("cv2.minMaxLoc", return_value=(0, 0.95, None, None)):
             mock_match.return_value = np.array([[0.95]])
@@ -174,7 +174,7 @@ class TestStepCheckImage(unittest.TestCase):
     def test_check_image_not_found(self):
         executor, _, capture, _, _ = _make_executor()
         capture.get_current_frame.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
-        with unittest.mock.patch("core.step_executor._load_template_cached", return_value=np.zeros((10, 10, 3), dtype=np.uint8)), \
+        with unittest.mock.patch("core.step_executor.StepExecutor._load_template", return_value=np.zeros((10, 10, 3), dtype=np.uint8)), \
              unittest.mock.patch("cv2.matchTemplate") as mock_match, \
              unittest.mock.patch("cv2.minMaxLoc", return_value=(0, 0.3, None, None)):
             mock_match.return_value = np.array([[0.3]])
@@ -187,14 +187,14 @@ class TestStepOcrRegion(unittest.TestCase):
     def test_ocr_recognizes_text(self):
         executor, _, _, ocr, _ = _make_executor()
         ocr.recognize.return_value = "购买"
-        step = {"type": "ocr_region"}
+        step = {"type": "ocr_region", "region": {"left": 0, "top": 0, "right": 100, "bottom": 50}}
         executor._step_ocr_region(step)
         self.assertEqual(executor._last_ocr_result, "购买")
 
     def test_ocr_assigns_variable(self):
         executor, _, _, ocr, _ = _make_executor()
         ocr.recognize.return_value = "12000"
-        step = {"type": "ocr_region", "assign_variable": "price"}
+        step = {"type": "ocr_region", "assign_variable": "price", "region": {"left": 0, "top": 0, "right": 100, "bottom": 50}}
         executor._step_ocr_region(step)
         self.assertEqual(executor._variables["price"], "12000")
 

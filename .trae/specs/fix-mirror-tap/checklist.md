@@ -1,0 +1,10 @@
+- [x] `_send_tap_async` 在 `_device_serial` 或 `_adb_core` 为空时输出 WARNING 日志而非静默返回
+- [x] `_send_tap_async` 实现了多方式 fallback（input touchscreen tap → input tap → input motionevent）
+- [x] tap 发送成功时记录 DEBUG 日志（包含坐标和方法名）
+- [x] tap 发送失败时记录 WARNING 日志（包含失败原因）
+- [x] `_view_to_device` 在横屏/竖屏模式下均能正确映射坐标（经验证无需修改）
+- [x] 旋转变化后宽高交换不影响坐标转换正确性
+- [x] 速率限制逻辑正常工作，超频点击被正确丢弃
+- [x] `update_frame()` 首次收到帧时自动初始化 `_device_width/_device_height`（**根因修复**）
+- [x] `mousePressEvent` 点击被忽略时输出 DEBUG 日志（**防御性日志**）
+- [x] `_on_frame_captured()` 同步分辨率状态到 ScreenshotPicker（**状态一致性**）

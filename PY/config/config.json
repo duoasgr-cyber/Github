@@ -1,9 +1,10 @@
 {
+  "config_version": 2,
   "buy_params": {
-    "user_price": 0.5,
-    "price_coefficient": 1,
-    "min_price": 0,
-    "max_mail_count": 1
+    "user_price": 0.0,
+    "price_coefficient": 4560,
+    "min_price": 300002,
+    "max_mail_count": 190
   },
   "mail_params": {
     "mail_count_file": "",
@@ -11,11 +12,11 @@
   },
   "schedule": {
     "enabled": false,
-    "start_time": "00:00"
+    "start_time": "04:00"
   },
   "recognition": {
-    "template_threshold": 0.0,
-    "template_dir": "",
+    "template_threshold": 0.7999999999999999,
+    "template_dir": "tp",
     "ocr_gpu": false
   },
   "ocr_regions": {
@@ -37,30 +38,48 @@
     "disable_cmd": ""
   },
   "device": {
-    "game_package": "",
+    "game_package": "com.tencent.tmgp.dfm",
     "base_resolution": {
-      "width": 1,
-      "height": 1
+      "width": 2400,
+      "height": 1080
     },
     "scrcpy_server_path": ""
   },
   "timing": {
-    "default_wait": 0.0,
-    "screenshot_wait": 0.0,
-    "game_start_wait": 1,
-    "match_wait": 1
+    "default_wait": 1.5,
+    "screenshot_wait": 0.9999999999999998,
+    "game_start_wait": 30,
+    "match_wait": 15
   },
   "logging": {
     "log_file": "app.log",
-    "log_level": "DEBUG",
-    "max_log_size_mb": 1
+    "log_level": "INFO",
+    "max_log_size_mb": 10
   },
   "ui": {
     "theme": "dark",
-    "floating_window_opacity": 0.0,
-    "floating_window_bg": "",
-    "price_color": "",
-    "mail_color": "",
-    "status_color": ""
+    "floating_window_opacity": 0.85,
+    "floating_window_bg": "#1a1a2e",
+    "price_color": "#00ff88",
+    "mail_color": "#ffaa00",
+    "status_color": "#a0a0a0"
+  },
+  "execution": {
+    "policy": {
+      "default_policy": "fail",
+      "max_retries": 3,
+      "retry_delay": 0.5,
+      "backoff_base": 1.0,
+      "backoff_max": 10.0,
+      "category_overrides": {}
+    }
+  },
+  "coordinate": {
+    "auto_scale": false,
+    "warn_on_mismatch": true
+  },
+  "telemetry": {
+    "enabled": false,
+    "endpoint": ""
   }
 }

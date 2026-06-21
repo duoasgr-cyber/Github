@@ -11,15 +11,16 @@
           "type": "wait",
           "seconds": 3.0,
           "comment": "等待购买完成",
-          "enabled": true,
-          "display_name": ""
+          "display_name": "",
+          "enabled": true
         },
         {
           "type": "tap",
-          "x": 1851,
-          "y": 1145,
-          "comment": "点制式卷",
-          "wait_after": 1
+          "enabled": true,
+          "wait_after": 1.0,
+          "x": 244,
+          "y": 273,
+          "comment": "点制式卷"
         },
         {
           "type": "tap",
@@ -44,10 +45,11 @@
         },
         {
           "type": "tap",
-          "x": 1402,
-          "y": 939,
-          "comment": "点提示的确认",
-          "wait_after": 1
+          "enabled": true,
+          "x": 2466,
+          "wait_after": 1.0,
+          "y": 1159,
+          "comment": "点提示的确认"
         },
         {
           "type": "tap",
@@ -272,7 +274,9 @@
           "x": 1978,
           "y": 1141,
           "comment": "点方案",
-          "wait_after": 0.5
+          "wait_after": 0,
+          "enabled": true,
+          "display_name": ""
         }
       ]
     },
@@ -303,11 +307,12 @@
         },
         {
           "type": "long_press",
-          "x": 2500,
-          "y": 1150,
+          "enabled": true,
+          "wait_after": 5.0,
           "duration": 5.0,
-          "comment": "长按方案的操作",
-          "wait_after": 5
+          "x": 110,
+          "y": 780,
+          "comment": "长按方案的操作"
         },
         {
           "type": "tap",

@@ -1,4 +1,4 @@
-﻿from PyQt5.QtWidgets import (
+from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
     QInputDialog, QMessageBox
 )
@@ -13,6 +13,20 @@ class DeviceBindWidget(QWidget):
 
     device_selected = pyqtSignal(str, str)   # serial, label
     rename_requested = pyqtSignal(str, str)  # serial, new_label
+    open_mirror_requested = pyqtSignal(str)  # serial  -- 新增：打开高清投屏
+
+    _MIRROR_STYLE_ACTIVE = (
+        "QPushButton { background-color: #da3633; border: 1px solid #f85149; "
+        "border-radius: 4px; color: #ffffff; font-size: 12px; padding: 2px 10px; }"
+        "QPushButton:hover { background-color: #f85149; }"
+        "QPushButton:disabled { background-color: #21262d; color: #484f58; border-color: #30363d; }"
+    )
+    _MIRROR_STYLE_INACTIVE = (
+        "QPushButton { background-color: #1f6feb; border: 1px solid #388bfd; "
+        "border-radius: 4px; color: #ffffff; font-size: 12px; padding: 2px 10px; }"
+        "QPushButton:hover { background-color: #388bfd; }"
+        "QPushButton:disabled { background-color: #21262d; color: #484f58; border-color: #30363d; }"
+    )
 
     def __init__(self, device_manager: DeviceManager, adb_core, parent=None):
         super().__init__(parent)
@@ -20,6 +34,7 @@ class DeviceBindWidget(QWidget):
         self._adb_core = adb_core
         self._bound_serial = ""
         self._bound_label = ""
+        self._mirror_active = False
         self._init_ui()
         self._start_poll()
 
@@ -57,6 +72,13 @@ class DeviceBindWidget(QWidget):
         self._btn_rename.clicked.connect(self._on_rename)
         btn_row.addWidget(self._btn_rename)
 
+        self._btn_mirror = QPushButton("高清投屏")
+        self._btn_mirror.setFixedHeight(28)
+        self._btn_mirror.setStyleSheet(self._MIRROR_STYLE_INACTIVE)
+        self._btn_mirror.setEnabled(False)
+        self._btn_mirror.clicked.connect(self._on_open_mirror)
+        btn_row.addWidget(self._btn_mirror)
+
         layout.addLayout(btn_row)
 
     def set_bound_device(self, serial: str, label: str = "") -> None:
@@ -70,6 +92,7 @@ class DeviceBindWidget(QWidget):
             self._status_dot.setStyleSheet("color: #8b949e; font-size: 14px;")
             self._btn_select.setText("选择")
             self._btn_rename.setVisible(False)
+            self._btn_mirror.setEnabled(False)
             return
 
         online = self._is_device_online()
@@ -79,8 +102,12 @@ class DeviceBindWidget(QWidget):
             self._status_dot.setStyleSheet("color: #3fb950; font-size: 14px;")
         else:
             self._status_dot.setStyleSheet("color: #d29922; font-size: 14px;")
+            # 设备离线时重置投屏按钮状态
+            if self._mirror_active:
+                self.set_mirror_active(False)
         self._btn_select.setText("重选")
         self._btn_rename.setVisible(True)
+        self._btn_mirror.setEnabled(online)
 
     def _is_device_online(self) -> bool:
         if not self._bound_serial:
@@ -124,3 +151,18 @@ class DeviceBindWidget(QWidget):
             self._bound_label = name.strip()
             self._refresh_display()
             self.rename_requested.emit(self._bound_serial, self._bound_label)
+
+    def _on_open_mirror(self):
+        """发出打开高清投屏的信号。"""
+        if self._bound_serial:
+            self.open_mirror_requested.emit(self._bound_serial)
+
+    def set_mirror_active(self, active: bool):
+        """更新投屏按钮的状态（文字和样式）。"""
+        self._mirror_active = active
+        if active:
+            self._btn_mirror.setText("取消投屏")
+            self._btn_mirror.setStyleSheet(self._MIRROR_STYLE_ACTIVE)
+        else:
+            self._btn_mirror.setText("高清投屏")
+            self._btn_mirror.setStyleSheet(self._MIRROR_STYLE_INACTIVE)

@@ -18,7 +18,7 @@ PRESET_WORKFLOWS = {
         "description": "标准购买流程",
         "device_resolution": {"width": 2400, "height": 1080},
         "steps": [
-            {"type": "launch", "package": "com.tencent.tmgp.dfm", "comment": "启动游戏", "wait_after": 5000},
+            {"type": "launch", "package": "com.tencent.tmgp.dfm", "wait_after": 5000, "comment": "启动游戏"},
             {"type": "wait", "seconds": 3, "comment": "等待加载"},
         ],
     },

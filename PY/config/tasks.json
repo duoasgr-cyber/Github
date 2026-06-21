@@ -1,19 +1,11 @@
 {
-  "active_task_id": "task_1",
+  "active_task_id": "task_2",
   "tasks": [
-    {
-      "id": "task_1",
-      "title": "任务1",
-      "workflow": "refresh_path",
-      "bound_device": "10AF490UQX001CC",
-      "bound_device_label": "",
-      "selected_step_index": 1
-    },
     {
       "id": "task_2",
       "title": "任务2",
-      "workflow": "",
-      "bound_device": "",
+      "workflow": "bian_dong",
+      "bound_device": "10AF490UQX001CC",
       "bound_device_label": "",
       "selected_step_index": 0
     }

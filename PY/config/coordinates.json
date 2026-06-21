@@ -1,38 +1,331 @@
 {
   "metadata": {
-    "resolution": {"width": 2400, "height": 1080},
+    "resolution": {
+      "width": 2400,
+      "height": 1080
+    },
     "description": "三角洲自动抢购工具 - 坐标配置文件",
-    "updated": "2026-05-31"
+    "updated": "2026-06-07"
   },
   "coordinates": {
-    "buy_button_1": {"x": 2548, "y": 844, "comment": "购买按钮1"},
-    "buy_button_2": {"x": 2550, "y": 952, "comment": "购买按钮2"},
-    "confirm_button": {"x": 2555, "y": 1145, "comment": "右下角确认"},
-    "prompt_confirm": {"x": 1402, "y": 939, "comment": "提示确认"},
-    "cancel_button": {"x": 2680, "y": 1050, "comment": "取消按钮"},
-    "beizhan": {"x": 2392, "y": 1138, "comment": "备战"},
-    "start_match": {"x": 2392, "y": 1138, "comment": "开始匹配"},
-    "daba": {"x": 1132, "y": 315, "comment": "选择大坝"},
-    "start_button": {"x": 2408, "y": 975, "comment": "开始"},
-    "fangan": {"x": 1978, "y": 1141, "comment": "方案"},
-    "warehouse": {"x": 222, "y": 1150, "comment": "仓库"},
-    "transfer_all": {"x": 946, "y": 1150, "comment": "全部转移"},
-    "use_button": {"x": 1600, "y": 1145, "comment": "使用"},
-    "reconnect": {"x": 1731, "y": 872, "comment": "重新连接"},
-    "cancel_reconnect": {"x": 1170, "y": 855, "comment": "取消重连"},
-    "confirm_reconnect": {"x": 1700, "y": 860, "comment": "确认重连"},
-    "dismiss_ad": {"x": 2580, "y": 81, "comment": "点掉广告"},
-    "refresh_button": {"x": 120, "y": 50, "comment": "刷新"},
-    "refresh_confirm": {"x": 2360, "y": 340, "comment": "刷新确认"},
-    "add_button": {"x": 2335, "y": 685, "comment": "加号位置"},
-    "price_region": {"left": 1316, "top": 648, "right": 1590, "bottom": 703, "comment": "价格OCR区域"},
-    "button_region": {"left": 1300, "top": 648, "right": 1580, "bottom": 705, "comment": "按钮OCR区域"},
-    "programme_0": {"x": 350, "y": 210, "comment": "初始方案"},
-    "programme_1": {"x": 350, "y": 420, "comment": "方案1"},
-    "programme_2": {"x": 350, "y": 550, "comment": "方案2"},
-    "programme_3": {"x": 350, "y": 680, "comment": "方案3"},
-    "programme_4": {"x": 350, "y": 810, "comment": "方案4"},
-    "long_press_scheme": {"x": 2500, "y": 1150, "comment": "长按方案"},
-    "mail_button": {"x": 1851, "y": 1145, "comment": "制式卷"}
+    "buy_button_1": {
+      "x": 2548,
+      "y": 844,
+      "comment": "购买按钮1"
+    },
+    "buy_button_2": {
+      "x": 2550,
+      "y": 952,
+      "comment": "购买按钮2"
+    },
+    "confirm_button": {
+      "x": 2555,
+      "y": 1145,
+      "comment": "右下角确认"
+    },
+    "prompt_confirm": {
+      "x": 1402,
+      "y": 939,
+      "comment": "提示确认"
+    },
+    "cancel_button": {
+      "x": 2680,
+      "y": 1050,
+      "comment": "取消按钮"
+    },
+    "beizhan": {
+      "x": 2392,
+      "y": 1138,
+      "comment": "备战"
+    },
+    "start_match": {
+      "x": 2392,
+      "y": 1138,
+      "comment": "开始匹配"
+    },
+    "daba": {
+      "x": 1132,
+      "y": 315,
+      "comment": "选择大坝"
+    },
+    "start_button": {
+      "x": 2408,
+      "y": 975,
+      "comment": "开始"
+    },
+    "fangan": {
+      "x": 1978,
+      "y": 1141,
+      "comment": "方案"
+    },
+    "warehouse": {
+      "x": 222,
+      "y": 1150,
+      "comment": "仓库"
+    },
+    "transfer_all": {
+      "x": 946,
+      "y": 1150,
+      "comment": "全部转移"
+    },
+    "use_button": {
+      "x": 1600,
+      "y": 1145,
+      "comment": "使用"
+    },
+    "reconnect": {
+      "x": 1731,
+      "y": 872,
+      "comment": "重新连接"
+    },
+    "cancel_reconnect": {
+      "x": 1170,
+      "y": 855,
+      "comment": "取消重连"
+    },
+    "confirm_reconnect": {
+      "x": 1700,
+      "y": 860,
+      "comment": "确认重连"
+    },
+    "dismiss_ad": {
+      "x": 2580,
+      "y": 81,
+      "comment": "点掉广告"
+    },
+    "refresh_button": {
+      "x": 120,
+      "y": 50,
+      "comment": "刷新"
+    },
+    "refresh_confirm": {
+      "x": 2360,
+      "y": 340,
+      "comment": "刷新确认"
+    },
+    "add_button": {
+      "x": 2335,
+      "y": 685,
+      "comment": "加号位置"
+    },
+    "price_region": {
+      "left": 1316,
+      "top": 648,
+      "right": 1590,
+      "bottom": 703,
+      "comment": "价格OCR区域"
+    },
+    "button_region": {
+      "left": 1300,
+      "top": 648,
+      "right": 1580,
+      "bottom": 705,
+      "comment": "按钮OCR区域"
+    },
+    "programme_0": {
+      "x": 350,
+      "y": 210,
+      "comment": "初始方案"
+    },
+    "programme_1": {
+      "x": 350,
+      "y": 420,
+      "comment": "方案1"
+    },
+    "programme_2": {
+      "x": 350,
+      "y": 550,
+      "comment": "方案2"
+    },
+    "programme_3": {
+      "x": 350,
+      "y": 680,
+      "comment": "方案3"
+    },
+    "programme_4": {
+      "x": 350,
+      "y": 810,
+      "comment": "方案4"
+    },
+    "long_press_scheme": {
+      "x": 2500,
+      "y": 1150,
+      "comment": "长按方案"
+    },
+    "mail_button": {
+      "x": 1851,
+      "y": 1145,
+      "comment": "制式卷"
+    },
+    "open_mail": {
+      "x": 2564,
+      "y": 49,
+      "comment": "????"
+    },
+    "mail_system_tab": {
+      "x": 180,
+      "y": 180,
+      "comment": "??????"
+    },
+    "partial_claim": {
+      "x": 2667,
+      "y": 1058,
+      "comment": "????"
+    },
+    "claim_button": {
+      "x": 2555,
+      "y": 1145,
+      "comment": "??/??"
+    },
+    "dismiss_equip": {
+      "x": 1450,
+      "y": 870,
+      "comment": "??????"
+    },
+    "pass_close": {
+      "x": 1320,
+      "y": 970,
+      "comment": "?????/3x3??"
+    },
+    "agree_btn": {
+      "x": 855,
+      "y": 1080,
+      "comment": "????"
+    },
+    "qq_login": {
+      "x": 1635,
+      "y": 990,
+      "comment": "QQ??"
+    },
+    "qq_agree": {
+      "x": 628,
+      "y": 2350,
+      "comment": "QQ??"
+    },
+    "back_btn": {
+      "x": 100,
+      "y": 100,
+      "comment": "??(??)"
+    },
+    "refresh_top": {
+      "x": 120,
+      "y": 50,
+      "comment": "??-??"
+    },
+    "refresh_list": {
+      "x": 2360,
+      "y": 340,
+      "comment": "??-??"
+    },
+    "scheme_0": {
+      "x": 350,
+      "y": 210,
+      "comment": "????"
+    },
+    "scheme_1": {
+      "x": 350,
+      "y": 420,
+      "comment": "??1"
+    },
+    "scheme_2": {
+      "x": 350,
+      "y": 550,
+      "comment": "??2"
+    },
+    "scheme_3": {
+      "x": 350,
+      "y": 680,
+      "comment": "??3"
+    },
+    "scheme_4": {
+      "x": 350,
+      "y": 810,
+      "comment": "??4"
+    },
+    "use_item": {
+      "x": 1600,
+      "y": 1145,
+      "comment": "??"
+    },
+    "format_scroll": {
+      "x": 1851,
+      "y": 1145,
+      "comment": "???"
+    },
+    "check_bag_1": {
+      "x": 1117,
+      "y": 1141,
+      "comment": "???1"
+    },
+    "check_bag_2": {
+      "x": 1298,
+      "y": 1141,
+      "comment": "???2"
+    },
+    "check_bag_alt_1": {
+      "x": 1945,
+      "y": 1141,
+      "comment": "???_??1"
+    },
+    "check_bag_alt_2": {
+      "x": 2088,
+      "y": 1141,
+      "comment": "???_??2"
+    },
+    "trade_house": {
+      "x": 640,
+      "y": 1180,
+      "comment": "???"
+    },
+    "sell_tab": {
+      "x": 170,
+      "y": 310,
+      "comment": "??"
+    },
+    "bullet_left": {
+      "x": 1476,
+      "y": 1040,
+      "comment": "?????"
+    },
+    "bullet_mid_pos": {
+      "x": 2014,
+      "y": 680,
+      "comment": "????"
+    },
+    "bullet_bottom_mid": {
+      "x": 1700,
+      "y": 1040,
+      "comment": "??????"
+    },
+    "bullet_back_pos": {
+      "x": 2268,
+      "y": 682,
+      "comment": "????"
+    },
+    "list_item": {
+      "x": 2014,
+      "y": 1000,
+      "comment": "??"
+    },
+    "claim_mail_btn": {
+      "x": 2555,
+      "y": 1145,
+      "comment": "????"
+    },
+    "cancel_mail_btn": {
+      "x": 1170,
+      "y": 1000,
+      "comment": "????"
+    },
+    "clicker_target": {
+      "x": 2335,
+      "y": 685,
+      "comment": "???????"
+    },
+    "open_main_page": {
+      "x": 2555,
+      "y": 1145,
+      "comment": "???????"
+    }
   }
 }

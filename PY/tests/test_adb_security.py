@@ -129,11 +129,11 @@ class TestAdbCoreShellFalse(unittest.TestCase):
 
     @unittest.mock.patch("core.adb_core.subprocess.run")
     def test_input_text_passes_text_safely(self, mock_run):
-        """input_text 应将文本作为列表参数传递。"""
+        """input_text 应将文本作为列表参数传递，空格转为 %s。"""
         mock_run.return_value = unittest.mock.MagicMock(returncode=0, stdout="", stderr="")
         self.adb.input_text("hello world")
         cmd = mock_run.call_args[0][0]
-        self.assertEqual(cmd[-1], "hello world")
+        self.assertEqual(cmd[-1], "hello%sworld")
         self.assertFalse(mock_run.call_args[1].get("shell", True))
 
     @unittest.mock.patch("core.adb_core.subprocess.run")

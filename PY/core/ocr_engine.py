@@ -64,6 +64,34 @@ class OcrEngine:
             logger.error("OCR recognize error: %s", e)
             return ""
 
+    def recognize_detailed(self, image: np.ndarray, region: dict = None) -> list:
+        """返回详细的 OCR 识别结果，包含每个识别区域的文本和置信度。
+
+        Returns:
+            list of dict, 每个元素包含:
+                - text: str, 识别的文本片段
+                - confidence: float, 置信度 (0-1)
+                - bbox: list, 边界框 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        """
+        if not self._initialized or self._reader is None:
+            logger.warning("OCR not initialized when recognize_detailed was called")
+            return []
+        try:
+            cropped = self._crop_region(image, region)
+            results = self._reader.readtext(cropped)
+            detailed = []
+            for bbox, text, confidence in results:
+                detailed.append({
+                    "text": text,
+                    "confidence": float(confidence),
+                    "bbox": bbox,
+                })
+            logger.debug("OCR recognize_detailed result: %d items", len(detailed))
+            return detailed
+        except Exception as e:
+            logger.error("OCR recognize_detailed error: %s", e)
+            return []
+
     def recognize_price(self, image: np.ndarray, region: dict = None) -> int:
         if not self._initialized or self._reader is None:
             logger.warning("OCR not initialized when recognize_price was called")
@@ -75,7 +103,9 @@ class OcrEngine:
             logger.debug("OCR recognize_price raw result: %s", text)
             cleaned = re.sub(r'[^\d,]', '', text)
             cleaned = cleaned.replace(',', '')
-            if cleaned and cleaned[-1] == '8':
+            # Game-specific: OCR often misreads trailing '0' as '8'
+            # This correction only applies to valid price-like numbers
+            if cleaned and cleaned[-1] == '8' and len(cleaned) >= 4:
                 cleaned = cleaned[:-1] + '0'
             if len(cleaned) < 6:
                 logger.debug("Price too short (%d digits), returning default", len(cleaned))

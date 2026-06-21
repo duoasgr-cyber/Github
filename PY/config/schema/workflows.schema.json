@@ -83,7 +83,9 @@
         "assign_variable": { "type": "string" },
         "recover_workflow": { "type": "string" },
         "expression": { "type": "string" },
-        "snippet_id": { "type": "string" }
+        "snippet_id": { "type": "string" },
+        "execution_result": { "$ref": "#/$defs/execution_result" },
+        "preview": { "$ref": "#/$defs/preview" }
       }
     },
     "region": {
@@ -93,6 +95,43 @@
         "top": { "type": "integer" },
         "right": { "type": "integer" },
         "bottom": { "type": "integer" }
+      }
+    },
+    "execution_result": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["success", "fail", "pending", "running"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "match_location": { "$ref": "#/$defs/point" },
+        "recognized_text": { "type": "string" },
+        "timestamp": { "type": "integer" },
+        "error_message": { "type": "string" }
+      }
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "template_image": { "type": "string" },
+        "region_image": { "type": "string" },
+        "match_region": { "$ref": "#/$defs/rectangle" },
+        "highlighted_text": { "type": "string" },
+        "screenshot_thumbnail": { "type": "string" }
+      }
+    },
+    "point": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" }
+      }
+    },
+    "rectangle": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "w": { "type": "integer" },
+        "h": { "type": "integer" }
       }
     }
   }

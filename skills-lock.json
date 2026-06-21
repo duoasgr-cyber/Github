@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "library/visual/url-to-design/SKILL.md",
       "computedHash": "5a540cd04013160cc676722f812af1c3c819fe8ec6bddeca4ba733d585349793"
+    },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/systematic-debugging/SKILL.md",
+      "computedHash": "7246fdd3a795fc3daff0af72044ca99bf836e4e6a46844742858786fdfb86488"
     }
   }
 }

@@ -1,3 +1,16 @@
 {
-  "sidebar_collapsed": false
+  "sidebar_collapsed": false,
+  "center_splitter_sizes": [
+    534,
+    405
+  ],
+  "main_splitter_sizes": [
+    457,
+    278
+  ],
+  "right_splitter_sizes": [],
+  "wf_splitter_sizes": [
+    200,
+    325
+  ]
 }
