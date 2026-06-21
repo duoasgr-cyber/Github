@@ -34,6 +34,14 @@ QListWidget::item:hover:!selected {
     background-color: #21262d;
 }
 
+/* Step list widget — override global item padding for custom item widgets */
+QListWidget#stepListWidget::item {
+    padding: 0px;
+}
+QListWidget#stepListWidget::item:selected {
+    background-color: #1f6feb;
+}
+
 QPushButton {
     background-color: #21262d;
     border: 1px solid #30363d;

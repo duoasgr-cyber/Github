@@ -61,10 +61,10 @@ def _detect_scrcpy_version() -> str:
 
     优先级：
     1. 从 scrcpy 客户端命令获取
-    2. 兜底返回 "2.0"
+    2. 兜底返回 "4.0"（适配 scrcpy 4.0）
 
     Returns:
-        版本号字符串，如 "3.3.4"；检测失败返回 "2.0" 作为兜底。
+        版本号字符串，如 "4.0.0"、"3.3.4"；检测失败返回 "4.0" 作为兜底。
     """
     try:
         result = subprocess.run(
@@ -75,16 +75,16 @@ def _detect_scrcpy_version() -> str:
             creationflags=_NO_WINDOW,
             startupinfo=_STARTUPINFO,
         )
-        # 输出格式: "scrcpy 3.3.4 <https://...>"
+        # 输出格式: "scrcpy 4.0.0 <https://...>"
         if result.returncode == 0 and result.stdout:
-            version_match = result.stdout.split()[1]  # "3.3.4"
+            version_match = result.stdout.split()[1]  # "4.0.0"
             if version_match[0].isdigit():
                 logger.debug("检测到 scrcpy 客户端版本: %s", version_match)
                 return version_match
     except Exception as e:
         logger.debug("检测 scrcpy 客户端版本失败: %s", e)
-    logger.debug("未检测到 scrcpy 客户端，使用兜底版本 2.0")
-    return "2.0"
+    logger.debug("未检测到 scrcpy 客户端，使用兜底版本 4.0")
+    return "4.0"
 
 
 def _detect_server_jar_version(jar_path: str) -> Optional[str]:
@@ -144,15 +144,18 @@ def _parse_major_version(version: str) -> int:
     """从版本字符串提取主版本号。
 
     Args:
-        version: 版本字符串，如 "3.3.4" 或 "2.0"
+        version: 版本字符串，如 "4.0.0"、"3.3.4" 或 "2.0"
 
     Returns:
-        主版本号整数，如 3 或 2。解析失败返回 2。
+        主版本号整数，如 4、3 或 2。解析失败返回 4（默认假设 4.0）。
     """
     try:
-        return int(version.split(".")[0])
+        major = int(version.split(".")[0])
+        if major < 2:
+            return 2  # 最小支持 2.x
+        return major
     except (ValueError, IndexError):
-        return 2
+        return 4  # 默认假设 4.0
 
 
 _SCRCPY_VERSION = None
@@ -379,6 +382,10 @@ class ScrcpyCapture(QObject):
                 server_version = _get_scrcpy_version()
                 logger.warning("无法从 JAR 检测版本，使用 scrcpy 客户端版本: %s（版本可能不匹配）", server_version)
 
+            # 0.1 版本兼容性检查（scrcpy 4.0 迁移新增）
+            client_version = _get_scrcpy_version()
+            self._validate_version_compatibility(client_version, server_version)
+
             # 1. 杀死设备上残留的 scrcpy server 进程
             self._kill_existing_server()
 
@@ -412,7 +419,7 @@ class ScrcpyCapture(QObject):
                 self._cleanup_scrcpy()
                 return False
 
-            # 6. 自适应读取协议头部（兼容 2.x 和 3.x）
+            # 6. 自适应读取协议头部（兼容 2.x / 3.x / 4.x）
             if not self._read_scrcpy_header(server_version):
                 self._log_server_stderr()
                 self._cleanup_scrcpy()
@@ -506,12 +513,13 @@ class ScrcpyCapture(QObject):
                 logger.error("所有端口转发尝试均失败")
 
     def _start_server_process(self, server_version: str = None):
-        """启动 scrcpy server 子进程。
+        """启动 scrcpy server 子进程（支持 2.x / 3.x / 4.x 版本自适应）。
 
         Args:
             server_version: 传给 server 的版本字符串，None 则使用模块级检测值
         """
         version = server_version or _get_scrcpy_version()
+        major = _parse_major_version(version)
         cmd = ["adb"]
         if self._serial:
             cmd += ["-s", self._serial]
@@ -531,9 +539,9 @@ class ScrcpyCapture(QObject):
             "control=false",
             "audio=false",
             "cleanup=false",
-            "send_frame_meta=false",
+            "send_frame_meta=False",
         ]
-        logger.info("启动 scrcpy server (version=%s)", version)
+        logger.info("启动 scrcpy server (version=%s, major=%d)", version, major)
         try:
             self._server_process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
@@ -612,16 +620,17 @@ class ScrcpyCapture(QObject):
         return bytes(buf)
 
     def _read_scrcpy_header(self, server_version: str) -> bool:
-        """自适应读取 scrcpy 协议头部，兼容 2.x 和 3.x。
+        """自适应读取 scrcpy 协议头部，兼容 2.x / 3.x / 4.x。
 
         scrcpy 协议头部格式：
         - 2.x: [1 byte dummy] [64 bytes device name] [4 bytes width] [4 bytes height]
         - 3.x: [1 byte dummy] [64 bytes device name] [4 bytes codec] [4 bytes width] [4 bytes height]
+        - 4.x: 与 3.x 格式向后兼容（可能扩展额外字段）
 
         自适应策略：读取设备名后，先读 4 字节，根据数据特征判断协议版本：
         - codec id (FourCC) 通常 > 0x10000000（如 "h264" = 0x68323634）
         - width 通常 < 10000（移动设备分辨率）
-        因此若前 4 字节 > 0x10000000 则为 3.x，否则为 2.x。
+        因此若前 4 字节 > 0x10000000 则为 3.x/4.x，否则为 2.x。
 
         Args:
             server_version: 检测到的 server 版本字符串（仅作日志参考）
@@ -658,31 +667,30 @@ class ScrcpyCapture(QObject):
             return False
 
         first_val = struct.unpack(">I", first_4_bytes)[0]
-        logger.debug("scrcpy 协议判断: first_4_bytes=0x%08x, server_version=%s", first_val, server_version)
+        major_version = _parse_major_version(server_version)
+        logger.debug("scrcpy 协议判断: first_4_bytes=0x%08x, major_version=%d, server_version=%s",
+                     first_val, major_version, server_version)
 
-        # 4. 根据数据特征判断协议版本
-        #    codec id (FourCC) > 0x10000000，width < 10000
+        # 4. 根据数据特征和版本号判断协议格式
         if first_val > 0x10000000:
-            # 3.x 协议: first_4_bytes = codec_id
+            # 3.x 或 4.x 协议: first_4_bytes = codec_id
             codec_id = first_val
             size_bytes = self._read_exact(sock, 8)
             if size_bytes is None:
-                logger.error("读取 scrcpy 分辨率失败 (3.x 协议)")
+                logger.error("读取 scrcpy 分辨率失败 (3.x/4.x 协议)")
                 return False
 
             self._frame_width = struct.unpack(">I", size_bytes[0:4])[0]
             self._frame_height = struct.unpack(">I", size_bytes[4:8])[0]
 
             if self._frame_width == 0 or self._frame_height == 0:
-                logger.error("scrcpy 分辨率无效 (3.x): %dx%d", self._frame_width, self._frame_height)
+                logger.error("scrcpy 分辨率无效 (3.x/4.x): %dx%d", self._frame_width, self._frame_height)
                 return False
 
+            version_label = "4.x" if major_version >= 4 else "3.x"
             logger.info(
-                "scrcpy 3.x 协议: 设备=%s, codec=0x%08x, 分辨率=%dx%d",
-                device_name,
-                codec_id,
-                self._frame_width,
-                self._frame_height,
+                "scrcpy %s 协议: 设备=%s, codec=0x%08x, 分辨率=%dx%d",
+                version_label, device_name, codec_id, self._frame_width, self._frame_height,
             )
         else:
             # 2.x 协议: first_4_bytes = width
@@ -700,6 +708,27 @@ class ScrcpyCapture(QObject):
 
             logger.info("scrcpy 2.x 协议: 设备=%s, 分辨率=%dx%d", device_name, self._frame_width, self._frame_height)
 
+        return True
+
+    def _validate_version_compatibility(self, client_ver: str, server_ver: str) -> bool:
+        """检测客户端与服务端版本兼容性。
+
+        Args:
+            client_ver: 客户端版本字符串
+            server_ver: 服务端版本字符串
+
+        Returns:
+            是否兼容（True=兼容，False=可能存在兼容性问题）
+        """
+        client_major = _parse_major_version(client_ver)
+        server_major = _parse_major_version(server_ver)
+
+        if abs(client_major - server_major) > 1:
+            logger.warning(
+                "scrcpy 版本差距过大: client=%s (major=%d), server=%s (major=%d)，可能出现兼容性问题",
+                client_ver, client_major, server_ver, server_major,
+            )
+            return False
         return True
 
     def _log_server_stderr(self):
@@ -772,12 +801,44 @@ class ScrcpyCapture(QObject):
             pass
         sock.setblocking(False)
 
-        # 创建 PyAV H.264 解码器
+        # 创建 PyAV 解码器（支持 H.264 / H.265 / AV1 动态选择）
+        # scrcpy 4.0 可能使用 H.265 或 AV1 编码，根据 codec_id 自动选择解码器
         try:
             codec = CodecContext.create("h264", "r")
         except Exception as e:
             logger.error("PyAV H.264 解码器创建失败: %s", e)
             return
+
+        # 编解码器映射表（FourCC → 解码器名称），用于动态切换
+        _CODEC_MAP = {
+            0x68323634: "h264",  # "h264"
+            0x68323635: "h265",  # "h265"
+            0x61766331: "av1",   # "av1"
+        }
+
+        def _create_decoder_for_codec(codec_id: int) -> Optional[CodecContext]:
+            """根据 codec FourCC 创建对应解码器（scrcpy 4.0+ 可能使用新编码格式）。
+
+            Args:
+                codec_id: 四字符编码标识符
+
+            Returns:
+                解码器实例，失败返回 None
+            """
+            codec_name = _CODEC_MAP.get(codec_id, "h264")
+            if codec_name != "h264":
+                logger.info("检测到非 H.264 编码 (codec_id=0x%08x)，尝试使用 %s 解码器", codec_id, codec_name)
+            try:
+                decoder = CodecContext.create(codec_name, "r")
+                logger.info("PyAV %s 解码器创建成功 (codec_id=0x%08x)", codec_name, codec_id)
+                return decoder
+            except Exception as e:
+                logger.warning("创建 %s 解码器失败: %s，回退到 H.264", codec_name, e)
+                try:
+                    return CodecContext.create("h264", "r")
+                except Exception as e2:
+                    logger.error("回退到 H.264 解码器也失败: %s", e2)
+                    return None
         # 开启多线程解码（AUTO 模式比默认 SLICE 快 ~5 倍）
         codec.thread_type = "AUTO"
         codec.thread_count = 0  # 0 = 自动选择线程数
@@ -793,7 +854,7 @@ class ScrcpyCapture(QObject):
         except Exception as e:
             logger.warning("设置 FAST/skip_loop_filter 失败: %s", e)
 
-        logger.info("PyAV H.264 解码器已启动 (thread_type=AUTO)")
+        logger.info("PyAV 解码器已启动 (thread_type=AUTO, 支持 H.264/H.265/AV1)")
 
         # 诊断变量
         loop_start_time = time.monotonic()

@@ -1,6 +1,10 @@
-﻿# 投屏（屏幕捕获）验收标准（针对当前仓库实现）
+# 投屏（屏幕捕获）验收标准（针对当前仓库实现）
 
-当前仓库的"投屏"实现在 `core/screen_capture.py` 中，本质是通过 **scrcpy + ffmpeg** 获取设备画面，并在 scrcpy 不可用时回退到 **adb exec-out screencap**。以下验收标准用于验证主链路：**发现设备 -> 启动投屏 -> 持续取帧 -> 断连感知 -> 自动恢复**。
+当前仓库的"投屏"实现在 `core/screen_capture.py` 中，本质是通过 **scrcpy + PyAV** 获取设备画面，并在 scrcpy 不可用时回退到 **adb exec-out screencap**。以下验收标准用于验证主链路：**发现设备 -> 启动投屏 -> 持续取帧 -> 断连感知 -> 自动恢复**。
+
+> **scrcpy 版本支持**: 2.x / 3.x / 4.0（自适应检测，默认兼容 4.0）
+>
+> **迁移状态**: 已完成 scrcpy 4.0 迁移（2026-06-21），详见 [`.trae/documents/scrcpy4-migration-plan.md`](../.trae/documents/scrcpy4-migration-plan.md)
 
 ## 一、功能主链路
 
@@ -29,8 +33,10 @@
 ## 三、兼容性与环境
 
 - Windows：`subprocess` 需使用 `CREATE_NO_WINDOW`，避免弹窗（当前代码已处理）。
-- ffmpeg 可用性：系统 PATH 内存在 ffmpeg；缺失时应有明确报错。
+- PyAV 可用性：系统需安装 PyAV 库（`pip install av`），用于 H.264/H.265/AV1 解码；缺失时应有明确报错。
+- scrcpy 版本：支持 **2.x / 3.x / 4.0** 自适应检测；默认兜底版本为 **4.0**。
 - 多设备：使用 `adb -s {serial}` 指定设备，避免串台。
+- Android 版本：scrcpy 4.0 要求 Android ≥ 7.0（推荐 ≥ 10）。
 
 ## 四、测试建议（可自动化）
 

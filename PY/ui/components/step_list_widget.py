@@ -284,6 +284,7 @@ class StepItemWidget(QWidget):
 
         # 右侧文本区
         text_container = QWidget()
+        text_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(1)
@@ -315,6 +316,7 @@ class StepItemWidget(QWidget):
         self._line2_label.setStyleSheet("color: #8b949e;")
         self._line2_label.setVisible(bool(summary))
         text_layout.addWidget(self._line2_label)
+        text_layout.addStretch(1)
 
         layout.addWidget(text_container, stretch=1)
 
@@ -404,6 +406,7 @@ class StepListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFont(QFont("Microsoft YaHei", 10))
+        self.setObjectName("stepListWidget")
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.currentRowChanged.connect(self._on_row_changed)
