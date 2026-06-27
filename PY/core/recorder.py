@@ -1,234 +1,157 @@
-﻿"""Shadow recorder for capturing user interactions as workflow steps.
+"""投屏录制：把投屏窗口中的交互录制为工作流步骤（事件驱动）。
 
-Records ADB events (tap, swipe, keyevent) from the connected device and
-generates a draft workflow that can be applied to the workflow editor.
+由 MirrorWidget 的 interaction_started/ended 信号驱动，按下→抬起为一组手势：
+  - 按下点 ≈ 抬起点（位移 < 阈值）→ tap 步骤
+  - 有位移 → swipe 步骤（含 duration，单位毫秒）
+操作间等待自动写入上一步的 wait_after（单位秒），类似按键精灵的录制。
+
+坐标约定：步骤坐标为 **设备物理分辨率**（与 screenshot_picker 的
+_img_to_device 一致，基准 base_resolution，默认 2400×1080），
+由 step_executor._scale_coord 在回放时按当前设备分辨率缩放，支持跨设备回放。
+
+字段单位（与 step_executor 对齐）：
+  - tap.wait_after / swipe.wait_after：秒
+  - swipe.duration：毫秒
 """
 import logging
-import time
-import threading
-from typing import Optional, List, Dict, Callable
+import math
+from typing import List, Optional, Tuple
+
 from PyQt5.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-
-class RecorderEvent:
-    """Represents a single recorded interaction event."""
-
-    def __init__(self, event_type: str, timestamp: float, data: dict):
-        self.event_type = event_type
-        self.timestamp = timestamp
-        self.data = data
-
-    def to_step(self) -> dict:
-        """Convert this event to a workflow step dict."""
-        step = {"type": self.event_type, "comment": f"Recorded at {self.timestamp:.1f}"}
-        step.update(self.data)
-        return step
-
-    def __repr__(self):
-        return f"RecorderEvent({self.event_type}, {self.data})"
+# tap 判定阈值：设备短边的 0.5%（按 base_resolution 归一化，跨设备通用）
+_TAP_THRESHOLD_PCT = 0.005
+# 噪点过滤：按下到抬起时长小于此值视为误触，忽略（秒）
+_NOISE_MIN_DURATION = 0.008
 
 
-class Recorder(QObject):
-    """Records user interactions from ADB and generates workflow step drafts.
+class StepRecorder(QObject):
+    """事件驱动的步骤录制器。
+
+    接收 MirrorWidget 的交互信号，把手势分类为 tap/swipe 步骤，
+    并记录操作间等待。坐标为设备物理坐标系。
 
     Signals:
-        event_recorded: Emitted when a new event is captured
-        recording_started: Emitted when recording begins
-        recording_stopped: Emitted when recording ends
+        event_recorded(dict): 录制到一个新步骤时发出（实时预览用）
+        recording_started(): 录制开始
+        recording_stopped(list): 录制停止，参数为步骤列表
     """
 
     event_recorded = pyqtSignal(dict)
     recording_started = pyqtSignal()
-    recording_stopped = pyqtSignal()
+    recording_stopped = pyqtSignal(list)
 
-    def __init__(self, adb_core=None, screen_capture=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._adb_core = adb_core
-        self._screen_capture = screen_capture
-        self._events: List[RecorderEvent] = []
-        self._recording = False
-        self._lock = threading.Lock()
-        self._poll_thread: Optional[threading.Thread] = None
-        self._stop_flag = False
+        self._recording: bool = False
+        self._steps: List[dict] = []
+        self._press_point: Optional[Tuple[int, int, float]] = None  # (x, y, ts)
+        self._last_end_time: float = 0.0  # 上一步抬起的绝对时间戳
+        self._step_counter: int = 1
+        self._base_resolution: Tuple[int, int] = (2400, 1080)
 
+    # ---- 配置 ----
+    def set_base_resolution(self, width: int, height: int) -> None:
+        """设置设备物理分辨率，用于计算 tap 判定阈值。"""
+        self._base_resolution = (int(width), int(height))
+
+    # ---- 录制控制 ----
     def start_recording(self) -> bool:
-        """Start recording interactions."""
         if self._recording:
-            logger.warning("Already recording")
+            logger.warning("录制已在进行中")
             return False
-
-        with self._lock:
-            self._events.clear()
-            self._recording = True
-            self._stop_flag = False
-
+        self._steps.clear()
+        self._press_point = None
+        self._last_end_time = 0.0
+        self._step_counter = 1
+        self._recording = True
         self.recording_started.emit()
-        logger.info("Recording started")
-
-        # Start polling for getevent output in background
-        self._poll_thread = threading.Thread(target=self._poll_getevent, daemon=True)
-        self._poll_thread.start()
+        logger.info("开始录制")
         return True
 
     def stop_recording(self) -> List[dict]:
-        """Stop recording and return the captured steps as a list of dicts."""
         if not self._recording:
             return []
-
-        self._stop_flag = True
         self._recording = False
-
-        if self._poll_thread and self._poll_thread.is_alive():
-            self._poll_thread.join(timeout=3.0)
-
-        with self._lock:
-            steps = [evt.to_step() for evt in self._events]
-
-        self.recording_stopped.emit()
-        logger.info("Recording stopped: %d events captured", len(steps))
+        self._press_point = None
+        # 最后一步的 wait_after 无下一步承接，保持默认 0（尾部等待丢弃）
+        steps = list(self._steps)
+        self.recording_stopped.emit(steps)
+        logger.info("停止录制：共 %d 步", len(steps))
         return steps
 
     def is_recording(self) -> bool:
         return self._recording
 
-    def get_events(self) -> List[dict]:
-        with self._lock:
-            return [evt.to_step() for evt in self._events]
+    def get_steps(self) -> List[dict]:
+        return list(self._steps)
 
-    def clear(self):
-        with self._lock:
-            self._events.clear()
+    def clear(self) -> None:
+        self._steps.clear()
+        self._press_point = None
+        self._last_end_time = 0.0
+        self._step_counter = 1
 
-    def add_manual_event(self, event_type: str, data: dict):
-        """Manually add an event (e.g., from UI interactions)."""
-        evt = RecorderEvent(event_type, time.time(), data)
-        with self._lock:
-            self._events.append(evt)
-        self.event_recorded.emit(evt.to_step())
+    # ---- 交互信号槽（由 MirrorWidget 连接）----
+    def on_interaction_started(self, x: int, y: int, ts: float) -> None:
+        """按下：记录起点与时间。"""
+        if not self._recording:
+            return
+        self._press_point = (x, y, ts)
 
-    def generate_workflow(self, name: str = "recorded", device_resolution: dict = None) -> dict:
-        """Generate a workflow dict from recorded events."""
-        with self._lock:
-            steps = [evt.to_step() for evt in self._events]
+    def on_interaction_ended(self, x: int, y: int, ts: float) -> None:
+        """抬起：分类手势并生成步骤，记录操作间等待。"""
+        if not self._recording or self._press_point is None:
+            return
+        px, py, pts = self._press_point
+        self._press_point = None
 
-        workflow = {
-            "description": f"Recorded workflow with {len(steps)} steps",
-            "device_resolution": device_resolution or {"width": 2400, "height": 1080},
-            "steps": steps,
-        }
-        return workflow
-
-    def _poll_getevent(self):
-        """Poll getevent for touch/input events on the device."""
-        if self._adb_core is None:
-            logger.debug("No ADB core provided, skipping getevent polling")
+        duration = ts - pts
+        # 噪点过滤：极短且无意义的按下抬起
+        if duration < _NOISE_MIN_DURATION:
+            logger.debug("忽略噪点操作 (duration=%.4fs)", duration)
             return
 
-        device = self._adb_core.get_device()
-        if not device:
-            logger.debug("No device connected, skipping getevent polling")
-            return
+        dist = math.hypot(x - px, y - py)
+        threshold = self._tap_threshold()
 
-        try:
-            import subprocess
-            cmd = f"adb -s {device} shell getevent -lt"
-            proc = subprocess.Popen(
-                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            )
+        if dist < threshold:
+            step = {
+                "type": "tap",
+                "x": int(px),
+                "y": int(py),
+                "comment": f"录制 #{self._step_counter}",
+                "wait_after": 0,
+            }
+        else:
+            step = {
+                "type": "swipe",
+                "x1": int(px),
+                "y1": int(py),
+                "x2": int(x),
+                "y2": int(y),
+                "duration": int(round(duration * 1000)),  # 秒 → 毫秒
+                "comment": f"录制 #{self._step_counter}",
+                "wait_after": 0,
+            }
 
-            touch_data = {}
-            last_event_time = 0
+        # 操作间等待：写入上一步 wait_after = 本次按下时间 - 上次抬起时间
+        if self._steps and self._last_end_time > 0:
+            gap = max(0.0, pts - self._last_end_time)
+            self._steps[-1]["wait_after"] = round(gap, 3)
 
-            for line in iter(proc.stdout.readline, b""):
-                if self._stop_flag:
-                    proc.terminate()
-                    break
+        self._steps.append(step)
+        self._last_end_time = ts
+        self._step_counter += 1
+        self.event_recorded.emit(dict(step))
+        logger.info("录制步骤 #%d: %s", self._step_counter - 1, step["type"])
 
-                decoded = line.decode("utf-8", errors="replace").strip()
-                if not decoded:
-                    continue
+    def _tap_threshold(self) -> float:
+        bw, bh = self._base_resolution
+        return min(bw, bh) * _TAP_THRESHOLD_PCT
 
-                # Parse getevent -lt output
-                # Format: [timestamp] /dev/input/eventX: type code value
-                event = self._parse_getevent_line(decoded, touch_data)
-                if event:
-                    now = time.time()
-                    # Debounce: don't record events too rapidly
-                    if now - last_event_time > 0.3:
-                        self.add_manual_event(event["type"], event["data"])
-                    last_event_time = now
 
-        except Exception as e:
-            logger.debug("getevent polling ended: %s", e)
-
-    def _parse_getevent_line(self, line: str, touch_data: dict) -> Optional[dict]:
-        """Parse a single getevent line and return an event dict if complete."""
-        # Simplified parser for common touch events
-        try:
-            # Extract the event part after the device path
-            parts = line.split(":")
-            if len(parts) < 2:
-                return None
-
-            event_part = parts[-1].strip()
-            tokens = event_part.split()
-            if len(tokens) < 3:
-                return None
-
-            event_type_str = tokens[0]  # e.g., 0003 (EV_ABS)
-            event_code = tokens[1]      # e.g., 0035 (ABS_MT_POSITION_X)
-            event_value = tokens[2]     # e.g., 00000abc
-
-            try:
-                code = int(event_code, 16)
-                value = int(event_value, 16)
-            except ValueError:
-                return None
-
-            # ABS_MT_POSITION_X = 0x35, ABS_MT_POSITION_Y = 0x36
-            # SYN_REPORT = 0x00
-            if code == 0x35:
-                touch_data["x"] = value
-            elif code == 0x36:
-                touch_data["y"] = value
-            elif code == 0x39:
-                touch_data["tracking_id"] = value
-                if value == 0xffffffff:
-                    # Finger up
-                    if "x" in touch_data and "y" in touch_data:
-                        event = {
-                            "type": "tap",
-                            "data": {"x": touch_data["x"], "y": touch_data["y"], "wait_after": 1}
-                        }
-                        touch_data.clear()
-                        return event
-            elif code == 0x3a:
-                touch_data["pressure"] = value
-
-        except Exception:
-            pass
-
-        return None
-
-    def export_steps_text(self) -> str:
-        """Export recorded steps as human-readable text."""
-        with self._lock:
-            lines = []
-            for i, evt in enumerate(self._events):
-                step = evt.to_step()
-                step_type = step.get("type", "unknown")
-                comment = step.get("comment", "")
-                line = f"{i + 1}. [{step_type}]"
-                if step_type == "tap":
-                    line += f" ({step.get('x', 0)}, {step.get('y', 0)})"
-                elif step_type == "swipe":
-                    line += f" ({step.get('x1', 0)},{step.get('y1', 0)}) -> ({step.get('x2', 0)},{step.get('y2', 0)})"
-                elif step_type == "keyevent":
-                    line += f" key={step.get('key', '')}"
-                if comment:
-                    line += f" -- {comment}"
-                lines.append(line)
-            return "\n".join(lines)
+# 兼容旧引用（原 Recorder 为 getevent 轮询死模块，已重构为事件驱动）
+Recorder = StepRecorder

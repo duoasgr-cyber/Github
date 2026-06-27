@@ -21,27 +21,27 @@ from ui.components.screenshot_picker import ScreenshotPicker
 
 
 STEP_TYPES = [
-    ("tap", "鐐瑰嚮", {"type": "tap", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
-    ("long_press", "闀挎寜", {"type": "long_press", "x": 0, "y": 0, "duration": 1000, "comment": "", "wait_after": 0}),
-    ("swipe", "婊戝姩", {"type": "swipe", "x1": 0, "y1": 0, "x2": 0, "y2": 0, "duration": 300, "comment": ""}),
-    ("keyevent", "鎸夐敭", {"type": "keyevent", "key": "4", "comment": ""}),
-    ("wait", "绛夊緟", {"type": "wait", "seconds": 1, "comment": ""}),
-    ("wifi", "WiFi鎺у埗", {"type": "wifi", "action": "enable", "comment": "", "wait_after": 0}),
-    ("force_stop", "寮哄埗鍋滄", {"type": "force_stop", "package": "", "comment": "", "wait_after": 0}),
-    ("launch", "鍚姩搴旂敤", {"type": "launch", "package": "", "comment": "", "wait_after": 0}),
-    ("screenshot", "鎴浘", {"type": "screenshot", "save_path": "", "comment": ""}),
-    ("pull_file", "鎷夊彇鏂囦欢", {"type": "pull_file", "remote": "", "local": "", "comment": ""}),
-    ("delete_file", "鍒犻櫎鏂囦欢", {"type": "delete_file", "path": "", "comment": ""}),
-    ("check_image", "鍥惧儚鍖归厤", {"type": "check_image", "template": "", "threshold": 0.85, "comment": ""}),
-    ("ocr_region", "OCR璇嗗埆", {"type": "ocr_region", "region": {"left": 0, "top": 0, "right": 0, "bottom": 0}, "comment": ""}),
-    ("tap_point", "绮剧‘鐐瑰嚮", {"type": "tap_point", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
-    ("call_workflow", "璋冪敤宸ヤ綔娴?, {"type": "call_workflow", "workflow": "", "comment": ""}),
-    ("condition", "鏉′欢鍒ゆ柇", {"type": "condition", "check": {}, "then_steps": [], "else_steps": [], "comment": ""}),
-    ("loop", "寰幆", {"type": "loop", "max_count": 10, "condition": {}, "steps": [], "comment": ""}),
-    ("input_text", "杈撳叆鏂囨湰", {"type": "input_text", "enabled": True, "display_name": "", "text": "", "comment": ""}),
-    ("variable", "鍙橀噺澶勭悊", {"type": "variable", "enabled": True, "display_name": "", "var_name": "", "var_type": "string", "var_value": "", "comment": ""}),
-    ("adb_command", "ADB鍛戒护", {"type": "adb_command", "enabled": True, "display_name": "", "adb_cmd": "", "assign_variable": "", "comment": ""}),
-    ("expression", "琛ㄨ揪寮?, {"type": "expression", "expression": "", "assign_variable": "", "comment": ""}),
+    ("tap", "点击", {"type": "tap", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
+    ("long_press", "长按", {"type": "long_press", "x": 0, "y": 0, "duration": 1000, "comment": "", "wait_after": 0}),
+    ("swipe", "滑动", {"type": "swipe", "x1": 0, "y1": 0, "x2": 0, "y2": 0, "duration": 300, "comment": ""}),
+    ("keyevent", "按键", {"type": "keyevent", "key": "4", "comment": ""}),
+    ("wait", "等待", {"type": "wait", "seconds": 1, "comment": ""}),
+    ("wifi", "WiFi控制", {"type": "wifi", "action": "enable", "comment": "", "wait_after": 0}),
+    ("force_stop", "强制停止", {"type": "force_stop", "package": "", "comment": "", "wait_after": 0}),
+    ("launch", "启动应用", {"type": "launch", "package": "", "comment": "", "wait_after": 0}),
+    ("screenshot", "截图", {"type": "screenshot", "save_path": "", "comment": ""}),
+    ("pull_file", "拉取文件", {"type": "pull_file", "remote": "", "local": "", "comment": ""}),
+    ("delete_file", "删除文件", {"type": "delete_file", "path": "", "comment": ""}),
+    ("check_image", "图像匹配", {"type": "check_image", "template": "", "threshold": 0.85, "comment": ""}),
+    ("ocr_region", "OCR识别", {"type": "ocr_region", "region": {"left": 0, "top": 0, "right": 0, "bottom": 0}, "comment": ""}),
+    ("tap_point", "精确点击", {"type": "tap_point", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
+    ("call_workflow", "调用工作流", {"type": "call_workflow", "workflow": "", "comment": ""}),
+    ("condition", "条件判断", {"type": "condition", "check": {}, "then_steps": [], "else_steps": [], "comment": ""}),
+    ("loop", "循环", {"type": "loop", "max_count": 10, "condition": {}, "steps": [], "comment": ""}),
+    ("input_text", "输入文本", {"type": "input_text", "enabled": True, "display_name": "", "text": "", "comment": ""}),
+    ("variable", "变量处理", {"type": "variable", "enabled": True, "display_name": "", "var_name": "", "var_type": "string", "var_value": "", "comment": ""}),
+    ("adb_command", "ADB命令", {"type": "adb_command", "enabled": True, "display_name": "", "adb_cmd": "", "assign_variable": "", "comment": ""}),
+    ("expression", "表达式", {"type": "expression", "expression": "", "assign_variable": "", "comment": ""}),
 ]
 
 STEP_TYPE_MAP = {t[0]: t for t in STEP_TYPES}
@@ -50,7 +50,7 @@ STEP_TYPE_MAP = {t[0]: t for t in STEP_TYPES}
 class StepTypeDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("閫夋嫨姝ラ绫诲瀷")
+        self.setWindowTitle("选择步骤类型")
         self.setMinimumSize(300, 400)
         self._selected_type = None
         self._setup_ui()
@@ -69,7 +69,7 @@ class StepTypeDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_ok = QPushButton("纭畾")
-        btn_cancel = QPushButton("鍙栨秷")
+        btn_cancel = QPushButton("取消")
         btn_ok.clicked.connect(self.accept)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addStretch()
@@ -118,17 +118,17 @@ class WorkflowPanel(QWidget):
         self._workflow_combo.currentIndexChanged.connect(self.on_workflow_selected)
         wf_toolbar.addWidget(self._workflow_combo, stretch=1)
 
-        btn_new_wf = QPushButton("鏂板缓")
+        btn_new_wf = QPushButton("新建")
         btn_new_wf.setFixedHeight(28)
         btn_new_wf.clicked.connect(self._new_workflow)
         wf_toolbar.addWidget(btn_new_wf)
 
-        btn_rename_wf = QPushButton("閲嶅懡鍚?)
+        btn_rename_wf = QPushButton("重命名")
         btn_rename_wf.setFixedHeight(28)
         btn_rename_wf.clicked.connect(self._rename_workflow)
         wf_toolbar.addWidget(btn_rename_wf)
 
-        btn_delete_wf = QPushButton("鍒犻櫎")
+        btn_delete_wf = QPushButton("删除")
         btn_delete_wf.setFixedHeight(28)
         btn_delete_wf.clicked.connect(self._delete_workflow)
         wf_toolbar.addWidget(btn_delete_wf)
@@ -141,31 +141,31 @@ class WorkflowPanel(QWidget):
         step_toolbar = QHBoxLayout()
         step_toolbar.setSpacing(4)
 
-        btn_add = QPushButton("娣诲姞姝ラ")
+        btn_add = QPushButton("添加步骤")
         btn_add.setFixedHeight(28)
         btn_add.clicked.connect(self.add_step)
         step_toolbar.addWidget(btn_add)
 
-        btn_delete = QPushButton("鍒犻櫎姝ラ")
+        btn_delete = QPushButton("删除步骤")
         btn_delete.setFixedHeight(28)
         btn_delete.clicked.connect(self.delete_step)
         step_toolbar.addWidget(btn_delete)
 
-        btn_copy = QPushButton("澶嶅埗姝ラ")
+        btn_copy = QPushButton("复制步骤")
         btn_copy.setFixedHeight(28)
         btn_copy.clicked.connect(self.copy_step)
         step_toolbar.addWidget(btn_copy)
 
-        btn_up = QPushButton("涓婄Щ")
+        btn_up = QPushButton("上移")
         btn_up.setFixedHeight(28)
         btn_up.clicked.connect(self.move_step_up)
         step_toolbar.addWidget(btn_up)
 
-        btn_down = QPushButton("涓嬬Щ")
+        btn_down = QPushButton("下移")
         btn_down.setFixedHeight(28)
         btn_down.clicked.connect(self.move_step_down)
         step_toolbar.addWidget(btn_down)
-        btn_snippet = QPushButton("閭︾墖搴?)
+        btn_snippet = QPushButton("片段库")
         btn_snippet.setFixedHeight(28)
         btn_snippet.clicked.connect(self._open_snippet_manager)
         step_toolbar.addWidget(btn_snippet)
@@ -300,6 +300,36 @@ class WorkflowPanel(QWidget):
         self._step_list.setCurrentRow(new_index)
         self.step_added.emit(new_index)
 
+    def append_recorded_steps(self, steps: list) -> int:
+        """追加录制的步骤到当前工作流，返回新增起始索引（-1 表示未追加）。"""
+        if not self._current_workflow_name or not steps:
+            return -1
+        workflow = self._config_manager.get_workflow(self._current_workflow_name)
+        if not workflow:
+            workflow = {"description": "", "device_resolution": {"width": 2400, "height": 1080}, "steps": []}
+        existing = workflow.get("steps", [])
+        start_index = len(existing)
+        existing.extend(copy.deepcopy(steps))
+        workflow["steps"] = existing
+        self._config_manager.set_workflow(self._current_workflow_name, workflow)
+        self.refresh_step_list()
+        return start_index
+
+    def get_device_resolution(self) -> tuple:
+        """返回当前工作流的设备分辨率 (width, height)，用于录制坐标基准。"""
+        if not self._current_workflow_name:
+            return (2400, 1080)
+        workflow = self._config_manager.get_workflow(self._current_workflow_name)
+        if not workflow:
+            return (2400, 1080)
+        dr = workflow.get("device_resolution", {})
+        return (dr.get("width", 2400), dr.get("height", 1080))
+
+    def set_editing_locked(self, locked: bool) -> None:
+        """录制期间锁定步骤编辑，防止并发修改。"""
+        self._step_list.setEnabled(not locked)
+        # add/delete/copy/move 等按钮如有也可在此禁用
+
     def delete_step(self):
         if not self._current_workflow_name:
             return
@@ -307,7 +337,7 @@ class WorkflowPanel(QWidget):
         if row < 0:
             return
         reply = QMessageBox.question(
-            self, "鍒犻櫎姝ラ", "纭畾瑕佸垹闄ら€変腑鐨勬楠ゅ悧锛?,
+            self, "删除步骤", "确定要删除选中的步骤吗？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
@@ -407,13 +437,13 @@ class WorkflowPanel(QWidget):
     workflow_saved = pyqtSignal(str)
 
     def _new_workflow(self):
-        name, ok = QInputDialog.getText(self, "鏂板缓宸ヤ綔娴?, "宸ヤ綔娴佸悕绉?")
+        name, ok = QInputDialog.getText(self, "新建工作流", "工作流名称")
         if not ok or not name.strip():
             return
         name = name.strip()
         workflows = self._config_manager.get_all_workflows()
         if name in workflows:
-            QMessageBox.warning(self, "鎻愮ず", f"宸ヤ綔娴?'{name}' 宸插瓨鍦?)
+            QMessageBox.warning(self, "提示", f"工作流 '{name}' 已存在")
             return
         workflow = {
             "description": "",
@@ -431,7 +461,7 @@ class WorkflowPanel(QWidget):
             return
         old_name = self._current_workflow_name
         new_name, ok = QInputDialog.getText(
-            self, "閲嶅懡鍚嶅伐浣滄祦", "鏂板悕绉?", text=old_name
+            self, "重命名工作流", "新名称", text=old_name
         )
         if not ok or not new_name.strip():
             return
@@ -440,7 +470,7 @@ class WorkflowPanel(QWidget):
             return
         workflows = self._config_manager.get_all_workflows()
         if new_name in workflows:
-            QMessageBox.warning(self, "鎻愮ず", f"宸ヤ綔娴?'{new_name}' 宸插瓨鍦?)
+            QMessageBox.warning(self, "提示", f"工作流 '{new_name}' 已存在")
             return
         workflow_data = workflows.get(old_name, {})
         self._config_manager.delete_workflow(old_name)
@@ -455,8 +485,8 @@ class WorkflowPanel(QWidget):
             return
         reply = QMessageBox.question(
             self,
-            "鍒犻櫎宸ヤ綔娴?,
-            f"纭畾瑕佸垹闄ゅ伐浣滄祦 '{self._current_workflow_name}' 鍚楋紵",
+            "删除工作流",
+            f"确定要删除工作流 '{self._current_workflow_name}' 吗？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

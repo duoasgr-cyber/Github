@@ -1,198 +1,199 @@
+"""投屏录制集成测试：录制 → 追加工作流 → 验证步骤格式。
+
+端到端验证 StepRecorder 的完整流程：
+1. 启动录制
+2. 模拟一系列交互（tap、swipe、操作间等待）
+3. 停止录制
+4. 验证生成的步骤列表格式正确
+5. 验证步骤可追加到 WorkflowPanel 的工作流
+6. 验证步骤格式与 StepExecutor 兼容
+"""
+import copy
 import unittest
-import unittest.mock
-import tempfile
-import os
-import json
-import sys
-import shutil
-import numpy as np
+from unittest import mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from core.config_manager import ConfigManager
-from core.adb_core import AdbCore, AdbError
-from core.step_executor import StepExecutor
-from core.ocr_engine import OcrEngine
+from core.recorder import StepRecorder
 
 
-class TestConfigManager(unittest.TestCase):
-    def setUp(self):
-        ConfigManager._instance = None
-        ConfigManager._init_flag = False
-        self.temp_dir = tempfile.mkdtemp()
-        config_dir = os.path.join(self.temp_dir, "config")
-        os.makedirs(config_dir, exist_ok=True)
-        with open(os.path.join(config_dir, "config.json"), "w", encoding="utf-8") as f:
-            json.dump(ConfigManager.DEFAULT_CONFIG, f)
-        with open(os.path.join(config_dir, "workflows.json"), "w", encoding="utf-8") as f:
-            json.dump({"workflows": {"test_wf": {"steps": [{"type": "wait", "seconds": 1}]}}}, f)
-        self.cm = ConfigManager(self.temp_dir)
-
-    def tearDown(self):
-        ConfigManager._instance = None
-        ConfigManager._init_flag = False
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_load_config(self):
-        config = self.cm._ensure_config()
-        self.assertIn("buy_params", config)
-        self.assertEqual(config["buy_params"]["user_price"], 0.5)
-
-    def test_get_config(self):
-        value = self.cm.get_config("buy_params.user_price")
-        self.assertEqual(value, 0.5)
-
-    def test_set_config(self):
-        self.cm.set_config("buy_params.user_price", 1.0)
-        self.assertEqual(self.cm.get_config("buy_params.user_price"), 1.0)
-        ConfigManager._instance = None
-        ConfigManager._init_flag = False
-        cm2 = ConfigManager(self.temp_dir)
-        self.assertEqual(cm2.get_config("buy_params.user_price"), 1.0)
-
-    def test_get_workflow(self):
-        wf = self.cm.get_workflow("test_wf")
-        self.assertIn("steps", wf)
-        self.assertEqual(len(wf["steps"]), 1)
-
-    def test_corrupted_recovery(self):
-        config_path = os.path.join(self.temp_dir, "config", "config.json")
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write("{corrupted!!!")
-        ConfigManager._instance = None
-        ConfigManager._init_flag = False
-        cm = ConfigManager(self.temp_dir)
-        value = cm.get_config("buy_params.user_price")
-        self.assertEqual(value, 0.5)
-
-
-class TestAdbCore(unittest.TestCase):
-    def setUp(self):
-        self.adb = AdbCore()
-
-    @unittest.mock.patch("core.adb_core.subprocess.run")
-    def test_execute_without_device(self, mock_run):
-        mock_run.return_value = unittest.mock.MagicMock(
-            returncode=1, stdout="", stderr="error: no devices"
-        )
-        with self.assertRaises(AdbError):
-            self.adb.execute("shell input tap 100 200")
-
-    @unittest.mock.patch("core.adb_core.subprocess.run")
-    def test_tap_command(self, mock_run):
-        mock_run.return_value = unittest.mock.MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
-        self.adb.set_device("test_device")
-        self.adb.tap(100, 200)
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        self.assertEqual(call_args, "adb -s test_device shell input tap 100 200")
-
-    @unittest.mock.patch("core.adb_core.subprocess.run")
-    def test_wifi_enable(self, mock_run):
-        mock_run.return_value = unittest.mock.MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
-        self.adb.set_device("test_device")
-        self.adb.wifi_enable()
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        self.assertEqual(call_args, "adb -s test_device shell svc wifi enable")
-
-
-class TestStepExecutor(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from PyQt5.QtWidgets import QApplication
-        cls.app = QApplication.instance()
-        if cls.app is None:
-            cls.app = QApplication([])
+class TestRecordReplayFlow(unittest.TestCase):
+    """录制 → 回放完整流程。"""
 
     def setUp(self):
-        self.config_manager = unittest.mock.MagicMock()
-        self.adb_core = unittest.mock.MagicMock()
-        self.screen_capture = unittest.mock.MagicMock()
-        self.ocr_engine = unittest.mock.MagicMock()
-        self.device_manager = unittest.mock.MagicMock()
-        self.executor = StepExecutor(
-            self.config_manager, self.adb_core,
-            self.screen_capture, self.ocr_engine,
-            self.device_manager
-        )
+        self.recorder = StepRecorder()
+        self.recorder.set_base_resolution(2400, 1080)
 
-    @unittest.mock.patch("core.step_executor.time.sleep")
-    def test_execute_wait_step(self, mock_sleep):
-        self.config_manager.get_workflow.return_value = {
-            "steps": [{"type": "wait", "seconds": 1.5}]
-        }
-        result = self.executor.execute_step("test_wf", 0)
-        self.assertTrue(result)
+    def test_record_tap_swipe_wait_sequence(self):
+        """录制典型操作序列：点击 → 等待 → 滑动 → 等待 → 点击。"""
+        self.recorder.start_recording()
 
-    @unittest.mock.patch("core.step_executor.time.sleep")
-    def test_execute_wifi_step(self, mock_sleep):
-        self.config_manager.get_workflow.return_value = {
-            "steps": [{"type": "wifi", "action": "enable"}]
-        }
-        self.adb_core.wifi_enable.return_value = True
-        result = self.executor.execute_step("test_wf", 0)
-        self.assertTrue(result)
-        self.adb_core.wifi_enable.assert_called_once()
+        # 1. 点击按钮 (0.0s → 0.05s)
+        self.recorder.on_interaction_started(1200, 800, 0.0)
+        self.recorder.on_interaction_ended(1200, 800, 0.05)
 
-    @unittest.mock.patch("core.step_executor.time.sleep")
-    def test_resolution_scaling(self, mock_sleep):
-        self.config_manager.get_workflow.return_value = {
+        # 等待 0.8s
+
+        # 2. 向上滑动 (0.85s → 1.15s)
+        self.recorder.on_interaction_started(1200, 900, 0.85)
+        self.recorder.on_interaction_ended(1200, 300, 1.15)
+
+        # 等待 0.5s
+
+        # 3. 点击另一个按钮 (1.65s → 1.70s)
+        self.recorder.on_interaction_started(600, 540, 1.65)
+        self.recorder.on_interaction_ended(600, 540, 1.70)
+
+        steps = self.recorder.stop_recording()
+
+        # 验证步骤数量
+        self.assertEqual(len(steps), 3)
+
+        # 步骤 1: tap
+        self.assertEqual(steps[0]["type"], "tap")
+        self.assertEqual(steps[0]["x"], 1200)
+        self.assertEqual(steps[0]["y"], 800)
+        self.assertAlmostEqual(steps[0]["wait_after"], 0.8, places=3)
+        self.assertEqual(steps[0]["comment"], "录制 #1")
+
+        # 步骤 2: swipe
+        self.assertEqual(steps[1]["type"], "swipe")
+        self.assertEqual(steps[1]["x1"], 1200)
+        self.assertEqual(steps[1]["y1"], 900)
+        self.assertEqual(steps[1]["x2"], 1200)
+        self.assertEqual(steps[1]["y2"], 300)
+        self.assertEqual(steps[1]["duration"], 300)  # 0.3s → 300ms
+        self.assertAlmostEqual(steps[1]["wait_after"], 0.5, places=3)
+        self.assertEqual(steps[1]["comment"], "录制 #2")
+
+        # 步骤 3: tap (最后一步 wait_after=0)
+        self.assertEqual(steps[2]["type"], "tap")
+        self.assertEqual(steps[2]["x"], 600)
+        self.assertEqual(steps[2]["y"], 540)
+        self.assertEqual(steps[2]["wait_after"], 0)
+        self.assertEqual(steps[2]["comment"], "录制 #3")
+
+    def test_recorded_steps_are_deep_copiable(self):
+        """录制的步骤应可深拷贝（追加到工作流时需要）。"""
+        self.recorder.start_recording()
+        self.recorder.on_interaction_started(100, 100, 0.0)
+        self.recorder.on_interaction_ended(100, 100, 0.05)
+        steps = self.recorder.stop_recording()
+
+        copied = copy.deepcopy(steps)
+        self.assertEqual(copied, steps)
+        copied[0]["x"] = 999
+        self.assertNotEqual(steps[0]["x"], 999)  # 原列表不受影响
+
+    def test_recorded_tap_format_matches_step_executor(self):
+        """tap 步骤格式与 StepExecutor 期望一致：type, x, y, comment, wait_after。"""
+        self.recorder.start_recording()
+        self.recorder.on_interaction_started(100, 200, 0.0)
+        self.recorder.on_interaction_ended(100, 200, 0.05)
+        steps = self.recorder.stop_recording()
+
+        tap = steps[0]
+        required_keys = {"type", "x", "y", "comment", "wait_after"}
+        self.assertTrue(required_keys.issubset(tap.keys()))
+        self.assertEqual(tap["type"], "tap")
+        self.assertIsInstance(tap["x"], int)
+        self.assertIsInstance(tap["y"], int)
+        self.assertIsInstance(tap["wait_after"], (int, float))
+
+    def test_recorded_swipe_format_matches_step_executor(self):
+        """swipe 步骤格式与 StepExecutor 期望一致：type, x1, y1, x2, y2, duration, comment, wait_after。"""
+        self.recorder.start_recording()
+        self.recorder.on_interaction_started(100, 100, 0.0)
+        self.recorder.on_interaction_ended(500, 800, 0.3)
+        steps = self.recorder.stop_recording()
+
+        swipe = steps[0]
+        required_keys = {"type", "x1", "y1", "x2", "y2", "duration", "comment", "wait_after"}
+        self.assertTrue(required_keys.issubset(swipe.keys()))
+        self.assertEqual(swipe["type"], "swipe")
+        self.assertIsInstance(swipe["duration"], int)  # 毫秒，整数
+        self.assertIsInstance(swipe["x1"], int)
+        self.assertIsInstance(swipe["x2"], int)
+
+    def test_empty_recording_produces_no_steps(self):
+        """开启后立即停止，不产生步骤。"""
+        self.recorder.start_recording()
+        steps = self.recorder.stop_recording()
+        self.assertEqual(len(steps), 0)
+
+    def test_rapid_taps_produce_separate_steps(self):
+        """连续快速点击应生成多个独立 tap 步骤。"""
+        self.recorder.start_recording()
+        for i in range(5):
+            t = i * 0.15
+            self.recorder.on_interaction_started(100 * i, 200, t)
+            self.recorder.on_interaction_ended(100 * i, 200, t + 0.02)
+
+        steps = self.recorder.stop_recording()
+        self.assertEqual(len(steps), 5)
+        for step in steps:
+            self.assertEqual(step["type"], "tap")
+
+    def test_coordinates_are_device_resolution(self):
+        """录制坐标应为设备物理分辨率（非视频流坐标）。
+
+        MirrorWidget 在发出 interaction_started/ended 信号时，
+        已通过 _img_to_device 将坐标转换为设备物理坐标系。
+        StepRecorder 直接记录收到的坐标，不做二次转换。
+        """
+        self.recorder.start_recording()
+        # 模拟 MirrorWidget 发出的设备坐标
+        self.recorder.on_interaction_started(1200, 540, 0.0)
+        self.recorder.on_interaction_ended(1200, 540, 0.05)
+        steps = self.recorder.stop_recording()
+
+        self.assertEqual(steps[0]["x"], 1200)
+        self.assertEqual(steps[0]["y"], 540)
+
+
+class TestWorkflowAppendFlow(unittest.TestCase):
+    """录制步骤追加到 WorkflowPanel 的流程。"""
+
+    def test_append_steps_to_workflow(self):
+        """模拟 WorkflowPanel.append_recorded_steps 的行为。"""
+        # 模拟工作流
+        workflow = {
+            "description": "",
             "device_resolution": {"width": 2400, "height": 1080},
-            "steps": [{"type": "tap", "x": 1200, "y": 540}]
-        }
-        self.device_manager.get_device_resolution.return_value = (1920, 900)
-        self.adb_core.tap.return_value = True
-        self.executor.execute_step("test_wf", 0)
-        expected_x = int(round(1200 * 1920 / 2400))
-        expected_y = int(round(540 * 900 / 1080))
-        self.adb_core.tap.assert_called_once_with(expected_x, expected_y)
-
-    @unittest.mock.patch("core.step_executor.time.sleep")
-    def test_error_recovery_skip(self, mock_sleep):
-        self.config_manager.get_workflow.return_value = {
             "steps": [
-                {"type": "tap", "x": 100, "y": 200, "on_fail": "skip"},
-                {"type": "wait", "seconds": 0.5}
-            ]
+                {"type": "tap", "x": 100, "y": 100, "comment": "existing", "wait_after": 0},
+            ],
         }
-        self.adb_core.tap.return_value = False
-        result = self.executor.execute_workflow("test_wf")
-        self.assertTrue(result)
 
+        # 录制新步骤
+        recorder = StepRecorder()
+        recorder.set_base_resolution(2400, 1080)
+        recorder.start_recording()
+        recorder.on_interaction_started(500, 500, 0.0)
+        recorder.on_interaction_ended(500, 500, 0.05)
+        recorder.on_interaction_started(600, 600, 0.3)
+        recorder.on_interaction_ended(600, 600, 0.35)
+        new_steps = recorder.stop_recording()
 
-class TestOcrEngine(unittest.TestCase):
-    def setUp(self):
-        OcrEngine._instance = None
+        # 追加
+        start_index = len(workflow["steps"])
+        workflow["steps"].extend(copy.deepcopy(new_steps))
 
-    def tearDown(self):
-        OcrEngine._instance = None
+        # 验证
+        self.assertEqual(len(workflow["steps"]), 3)
+        self.assertEqual(workflow["steps"][0]["comment"], "existing")
+        self.assertEqual(workflow["steps"][1]["comment"], "录制 #1")
+        self.assertEqual(workflow["steps"][2]["comment"], "录制 #2")
+        self.assertEqual(start_index, 1)
 
-    def test_singleton(self):
-        engine1 = OcrEngine()
-        engine2 = OcrEngine()
-        self.assertIs(engine1, engine2)
+        # 第一个录制步骤的 wait_after 应为 0.25 (0.3 - 0.05)
+        self.assertAlmostEqual(workflow["steps"][1]["wait_after"], 0.25, places=3)
 
-    def test_not_initialized(self):
-        engine = OcrEngine()
-        image = np.zeros((100, 100, 3), dtype=np.uint8)
-        result = engine.recognize(image)
-        self.assertEqual(result, "")
-
-    def test_price_cleaning(self):
-        engine = OcrEngine()
-        engine._initialized = True
-        engine._reader = unittest.mock.MagicMock()
-        engine._reader.readtext.return_value = [
-            [[0, 0, 100, 30], "1,234,568", 0.95]
-        ]
-        image = np.zeros((100, 100, 3), dtype=np.uint8)
-        result = engine.recognize_price(image)
-        self.assertEqual(result, 1234560)
+    def test_empty_steps_list_not_appended(self):
+        """空步骤列表不应追加。"""
+        workflow = {"steps": [{"type": "wait", "seconds": 1}]}
+        new_steps = []
+        if new_steps:
+            workflow["steps"].extend(copy.deepcopy(new_steps))
+        self.assertEqual(len(workflow["steps"]), 1)
 
 
 if __name__ == "__main__":

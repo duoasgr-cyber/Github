@@ -40,40 +40,40 @@ STEP_FIELD_DEFS = {
 }
 
 FIELD_LABELS = {
-    "enabled": "鍚敤",
-    "display_name": "鏄剧ず鍚嶇О",
-    "x": "X鍧愭爣",
-    "y": "Y鍧愭爣",
-    "x1": "璧风偣X",
-    "y1": "璧风偣Y",
-    "x2": "缁堢偣X",
-    "y2": "缁堢偣Y",
-    "duration": "鏃堕暱(ms)",
-    "comment": "澶囨敞",
-    "wait_after": "绛夊緟鍚?ms)",
-    "key": "鎸夐敭",
-    "seconds": "绉掓暟",
-    "action": "鍔ㄤ綔",
-    "package": "鍖呭悕",
-    "save_path": "淇濆瓨璺緞",
-    "remote": "杩滅▼璺緞",
-    "local": "鏈湴璺緞",
-    "path": "鏂囦欢璺緞",
-    "template": "妯℃澘璺緞",
-    "threshold": "闃堝€?,
-    "region": "鍖哄煙",
-    "workflow": "宸ヤ綔娴?,
-    "check": "鏉′欢",
-    "then_steps": "婊¤冻姝ラ",
-    "else_steps": "涓嶆弧瓒虫楠?,
-    "max_count": "鏈€澶ф鏁?,
-    "steps": "姝ラ",
-    "text": "鏂囨湰",
-    "var_name": "鍙橀噺鍚?,
-    "var_type": "鍙橀噺绫诲瀷",
-    "var_value": "鍙橀噺鍊?,
-    "adb_cmd": "ADB鍛戒护",
-    "assign_variable": "缁撴灉瀛樺叆鍙橀噺",
+    "enabled": "启用",
+    "display_name": "显示名称",
+    "x": "X坐标",
+    "y": "Y坐标",
+    "x1": "起点X",
+    "y1": "起点Y",
+    "x2": "终点X",
+    "y2": "终点Y",
+    "duration": "时长(ms)",
+    "comment": "备注",
+    "wait_after": "等待(秒)",
+    "key": "按键",
+    "seconds": "秒数",
+    "action": "动作",
+    "package": "包名",
+    "save_path": "保存路径",
+    "remote": "远程路径",
+    "local": "本地路径",
+    "path": "文件路径",
+    "template": "模板路径",
+    "threshold": "阈值",
+    "region": "区域",
+    "workflow": "工作流",
+    "check": "条件",
+    "then_steps": "满足步骤",
+    "else_steps": "不满足步骤",
+    "max_count": "最大次数",
+    "steps": "步骤",
+    "text": "文本",
+    "var_name": "变量名",
+    "var_type": "变量类型",
+    "var_value": "变量值",
+    "adb_cmd": "ADB命令",
+    "assign_variable": "结果存入变量",
 }
 
 WIFI_ACTIONS = ["enable", "disable", "toggle"]
@@ -110,7 +110,7 @@ class StepEditor(QScrollArea):
         self._layout.setContentsMargins(8, 8, 8, 8)
         self._layout.setSpacing(4)
 
-        self._placeholder = QLabel("閫夋嫨姝ラ浠ョ紪杈?)
+        self._placeholder = QLabel("选择步骤以编辑")
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setFont(QFont("Microsoft YaHei", 14))
         self._placeholder.setStyleSheet("color: #aaaaaa;")
