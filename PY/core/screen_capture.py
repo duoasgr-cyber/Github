@@ -59,6 +59,8 @@ class ScrcpyCapture(QObject):
         self._max_reconnect: int = 3
         self._last_emit_time: float = 0.0
         self._generation: int = 0
+        self._frame_w: int = 0
+        self._frame_h: int = 0
 
     def start(self, device_serial: str, server_jar_path: str, max_retries: int = 3) -> bool:
         if self._connected:
@@ -201,8 +203,8 @@ class ScrcpyCapture(QObject):
             "-analyzeduration", "0",
             "-f", "h264",
             "-i", "pipe:0",
-            "-f", "mjpeg",
-            "-q:v", "5",
+            "-f", "rawvideo",
+            "-pix_fmt", "bgr0",
             "pipe:1"
         ]
 
@@ -211,17 +213,23 @@ class ScrcpyCapture(QObject):
                 ffmpeg_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 bufsize=0,
                 creationflags=_SUBPROCESS_FLAGS
             )
         except FileNotFoundError:
             raise RuntimeError("ffmpeg鏈壘鍒帮紝璇风‘淇漟fmpeg宸插畨瑁呭苟娣诲姞鍒癙ATH")
 
+        self._frame_w, self._frame_h = 0, 0
+
         self._writer_thread = threading.Thread(
             target=self._socket_to_ffmpeg, args=(gen,), daemon=True
         )
         self._writer_thread.start()
+
+        self._frame_w, self._frame_h = self._probe_frame_size(gen, timeout=6.0)
+        if self._frame_w == 0 or self._frame_h == 0:
+            raise RuntimeError("无法解析视频宽高")
 
         self._decoder_thread = threading.Thread(
             target=self._decode_ffmpeg_output, args=(gen,), daemon=True
@@ -245,6 +253,39 @@ class ScrcpyCapture(QObject):
             except (ConnectionError, OSError):
                 return None
         return data
+
+    def _probe_frame_size(self, gen: int, timeout: float = 4.0) -> tuple:
+        import re
+        import select
+        pattern = re.compile(rb',\s*(\d+)x(\d+)[\s,]')
+        deadline = time.monotonic() + timeout
+        stderr = self._ffmpeg_process.stderr if self._ffmpeg_process else None
+        if stderr is None:
+            return 0, 0
+        fd = stderr.fileno()
+        collected = b""
+        while time.monotonic() < deadline:
+            if self._stopping or self._generation != gen:
+                break
+            if self._ffmpeg_process.poll() is not None:
+                break
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if not ready:
+                continue
+            try:
+                chunk = stderr.read(4096)
+            except (BlockingIOError, OSError):
+                time.sleep(0.02)
+                continue
+            if chunk:
+                collected += chunk
+                m = pattern.search(collected)
+                if m:
+                    return int(m.group(1)), int(m.group(2))
+            else:
+                time.sleep(0.02)
+        logger.warning("ffmpeg 未能解析分辨率，stderr 片段: %r", collected[-512:])
+        return 0, 0
 
     def _socket_to_ffmpeg(self, gen: int):
         logger.debug("socket璇诲彇绾跨▼鍚姩 [gen=%d]", gen)
@@ -290,8 +331,11 @@ class ScrcpyCapture(QObject):
                 self._handle_connection_lost()
 
     def _decode_ffmpeg_output(self, gen: int):
-        logger.debug("甯цВ鐮佺嚎绋嬪惎鍔?[gen=%d]", gen)
-        buf = b""
+        logger.debug("帧解码线程启动 [gen=%d]", gen)
+        w = self._frame_w
+        h = self._frame_h
+        frame_size = w * h * 4
+        buf = bytearray()
 
         try:
             while not self._stopping and self._generation == gen and self._ffmpeg_process:
@@ -303,39 +347,24 @@ class ScrcpyCapture(QObject):
                 except Exception:
                     break
 
-                while True:
-                    start = buf.find(b'\xff\xd8')
-                    if start == -1:
-                        if len(buf) > _JPEG_BUFFER_MAX:
-                            buf = buf[-1024:]
-                        break
+                while len(buf) >= frame_size:
+                    raw = bytes(buf[:frame_size])
+                    del buf[:frame_size]
+                    frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 4)
+                    frame = frame[:, :, :3]
 
-                    end = buf.find(b'\xff\xd9', start + 2)
-                    if end == -1:
-                        if len(buf) > _JPEG_BUFFER_MAX:
-                            buf = buf[start:]
-                        break
+                    with self._frame_lock:
+                        self._current_frame = frame
 
-                    jpeg_data = buf[start:end + 2]
-                    buf = buf[end + 2:]
-
-                    frame = cv2.imdecode(
-                        np.frombuffer(jpeg_data, dtype=np.uint8),
-                        cv2.IMREAD_COLOR
-                    )
-                    if frame is not None:
-                        with self._frame_lock:
-                            self._current_frame = frame
-
-                        now = time.monotonic()
-                        if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
-                            self._last_emit_time = now
-                            self.frame_captured.emit(frame)
+                    now = time.monotonic()
+                    if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
+                        self._last_emit_time = now
+                        self.frame_captured.emit(frame)
         except Exception as e:
             if not self._stopping:
-                logger.error("甯цВ鐮佺嚎绋嬪紓甯?[gen=%d]: %s", gen, e)
+                logger.error("帧解码线程异常 [gen=%d]: %s", gen, e)
         finally:
-            logger.debug("甯цВ鐮佺嚎绋嬬粨鏉?[gen=%d]", gen)
+            logger.debug("帧解码线程结束 [gen=%d]", gen)
 
     def _start_fallback_reader(self):
         self._fallback_thread = threading.Thread(target=self._fallback_loop, daemon=True)
