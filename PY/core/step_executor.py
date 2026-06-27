@@ -119,7 +119,10 @@ class StepExecutor(QObject):
             return False
 
         try:
-            result = handler(step)
+            if step_type in ("check_image", "ocr_region"):
+                result = handler(step, step_index)
+            else:
+                result = handler(step)
         except Exception as e:
             logger.error("步骤执行异常 [%s]: %s", step_type, e)
             return False

@@ -60,29 +60,37 @@ def _detect_scrcpy_version() -> str:
     """动态检测 scrcpy 版本号。
 
     优先级：
-    1. 从 scrcpy 客户端命令获取
-    2. 兜底返回 "4.0"（适配 scrcpy 4.0）
+    1. 项目自带的 scrcpy 客户端（lib/scrcpy-win64/scrcpy.exe）
+    2. 系统 PATH 中的 scrcpy
+    3. 兜底返回 "4.0"（适配 scrcpy 4.0）
 
     Returns:
-        版本号字符串，如 "4.0.0"、"3.3.4"；检测失败返回 "4.0" 作为兜底。
+        版本号字符串，如 "4.0"、"4.0.0"；检测失败返回 "4.0" 作为兜底。
     """
-    try:
-        result = subprocess.run(
-            ["scrcpy", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            creationflags=_NO_WINDOW,
-            startupinfo=_STARTUPINFO,
-        )
-        # 输出格式: "scrcpy 4.0.0 <https://...>"
-        if result.returncode == 0 and result.stdout:
-            version_match = result.stdout.split()[1]  # "4.0.0"
-            if version_match[0].isdigit():
-                logger.debug("检测到 scrcpy 客户端版本: %s", version_match)
-                return version_match
-    except Exception as e:
-        logger.debug("检测 scrcpy 客户端版本失败: %s", e)
+    # 按优先级尝试多个 scrcpy 客户端路径
+    candidates = [
+        os.path.join(_PROJECT_ROOT, "lib", "scrcpy-win64", "scrcpy.exe"),  # 项目自带（首选）
+        "scrcpy",  # 系统 PATH
+    ]
+    for exe_path in candidates:
+        try:
+            result = subprocess.run(
+                [exe_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=_NO_WINDOW,
+                startupinfo=_STARTUPINFO,
+            )
+            # 输出格式: "scrcpy 4.0 <https://...>"
+            if result.returncode == 0 and result.stdout:
+                version_match = result.stdout.split()[1]
+                if version_match[0].isdigit():
+                    logger.debug("检测到 scrcpy 客户端版本 (%s): %s", exe_path, version_match)
+                    return version_match
+        except Exception as e:
+            logger.debug("检测 %s 失败: %s", exe_path, e)
+            continue
     logger.debug("未检测到 scrcpy 客户端，使用兜底版本 4.0")
     return "4.0"
 
@@ -126,13 +134,17 @@ def _detect_server_jar_version(jar_path: str) -> Optional[str]:
                         logger.debug("从资源文件 %s 检测到版本: %s", name, version)
                         return version
             # 尝试从 .dex 文件中搜索版本号
+            # 注意：.dex 中包含大量第三方库版本（如 AndroidX 1.9.0、Gradle 8.x 等），
+            # 必须过滤掉这些干扰项，只匹配 scrcpy 自身版本格式
             for name in namelist:
                 if name.endswith(".dex"):
                     content = zf.read(name).decode("utf-8", errors="replace")
-                    matches = re.findall(r"\d+\.\d+\.\d+", content)
+                    matches = re.findall(r"\b(\d\.\d+(?:\.\d+)?)\b", content)
                     for version in matches:
                         major = int(version.split(".")[0])
-                        if major >= 2:
+                        # scrcpy 版本特征：主版本在 2~5 范围内（当前为 4.0）
+                        # 排除库版本：1.x (AndroidX)、8.x/9.x (AGP/Gradle)、27+/28+ (SDK)
+                        if 2 <= major <= 5:
                             logger.debug("从 dex 文件 %s 检测到版本: %s", name, version)
                             return version
     except Exception as e:
@@ -184,6 +196,7 @@ class ScrcpyCapture(QObject):
     """
 
     frame_captured = pyqtSignal(object)  # np.ndarray (RGB)
+    frame_ready = pyqtSignal()  # 新帧就绪通知（无参数，UI 通过版本号拉取，替代轮询）
     connection_lost = pyqtSignal()
     connection_restored = pyqtSignal()
     error_occurred = pyqtSignal(str)
@@ -285,13 +298,18 @@ class ScrcpyCapture(QObject):
             return self._frame_version
 
     def get_current_frame_if_new(self, last_version: int) -> Optional[tuple]:
-        """如果帧版本号大于 last_version，返回 (帧拷贝, 新版本号)；否则返回 None。
+        """如果帧版本号大于 last_version，返回 (帧引用, 新版本号)；否则返回 None。
 
         UI 用此方法避免重复渲染同一帧。
+
+        性能优化：返回内部缓存的引用而非拷贝。
+        采集线程每次 to_ndarray() 生成新数组，永不修改旧数组；
+        UI 线程只读不写（QImage 仅读取 data 指针），因此直接返回引用是安全的。
+        消除 1080×2400 RGB 帧 ~7.4MB/帧 的内存拷贝。
         """
         with self._lock:
             if self._frame_version > last_version and self._current_frame is not None:
-                return (self._current_frame.copy(), self._frame_version)
+                return (self._current_frame, self._frame_version)
             return None
 
     def capture_screenshot(self) -> Optional[np.ndarray]:
@@ -303,12 +321,18 @@ class ScrcpyCapture(QObject):
     def set_current_frame(self, frame: np.ndarray):
         """由采集后端调用，缓存最新帧。
 
-        不再 emit frame_captured 信号，UI 通过轮询 + 版本号获取新帧，
-        避免信号队列堆积导致卡顿。
+        缓存帧后 emit frame_ready 信号，UI 通过信号 + 版本号获取新帧，
+        替代固定间隔轮询，将显示唤醒延迟从 0~8ms 降到 ~0ms。
+        信号队列不会堆积：UI slot 用版本号跳过已渲染帧。
         """
         with self._lock:
             self._current_frame = frame
             self._frame_version += 1
+        # 通知 UI 有新帧（信号驱动，零延迟通知）
+        try:
+            self.frame_ready.emit()
+        except RuntimeError:
+            pass  # 信号已断开（UI 关闭等）
 
     def set_device(self, serial: str):
         """切换到不同设备。"""
@@ -374,16 +398,31 @@ class ScrcpyCapture(QObject):
             return False
 
         try:
-            # 0. 检测 server 版本（优先从 JAR，其次 scrcpy 客户端）
-            server_version = _detect_server_jar_version(self._server_jar)
-            if server_version:
-                logger.info("从 JAR 检测到 scrcpy server 版本: %s", server_version)
-            else:
-                server_version = _get_scrcpy_version()
-                logger.warning("无法从 JAR 检测版本，使用 scrcpy 客户端版本: %s（版本可能不匹配）", server_version)
-
-            # 0.1 版本兼容性检查（scrcpy 4.0 迁移新增）
+            # 0. 确定传给 server 的版本参数
+            # 策略：始终以客户端版本为准（因为 client 和 server 来自同一发布包，版本必须一致）
+            # JAR 内部版本检测仅作参考日志（4.0 的 JAR 中版本号嵌入方式不可靠）
             client_version = _get_scrcpy_version()
+            jar_detected_version = _detect_server_jar_version(self._server_jar)
+
+            if jar_detected_version:
+                jar_major = _parse_major_version(jar_detected_version)
+                client_major = _parse_major_version(client_version)
+                # 如果 JAR 检测到的版本与客户端不一致，记录警告但不影响运行
+                if jar_major != client_major or jar_major > 5:
+                    logger.warning(
+                        "JAR 版本检测 (%s, major=%d) 与客户端 (%s, major=%d) 不一致或异常，"
+                        "将以客户端版本 %s 作为 server 参数",
+                        jar_detected_version, jar_major,
+                        client_version, client_major,
+                        client_version,
+                    )
+                else:
+                    logger.info("从 JAR 检测到 scrcpy server 版本: %s", jar_detected_version)
+
+            server_version = client_version
+            logger.info("使用客户端版本作为 server 版本参数: %s", server_version)
+
+            # 0.1 版本兼容性检查
             self._validate_version_compatibility(client_version, server_version)
 
             # 1. 杀死设备上残留的 scrcpy server 进程
@@ -531,7 +570,12 @@ class ScrcpyCapture(QObject):
             "com.genymobile.scrcpy.Server",
             version,
             "log_level=warn",
-            "max_size=1280",
+            # max_size=0 表示不缩放，frame 尺寸 == 设备真实分辨率。
+            # 此前 max_size=1280 会把 1080x2400 缩成 576x1280，导致投屏点击
+            # 坐标与设备响应位置不一致（wm size Override 与 scrcpy 采集的物理
+            # 分辨率比例不一致时，比例补偿会失准）。取消限制后 frame 与设备
+            # 1:1 对齐，坐标映射无需依赖比例补偿。
+            "max_size=0",
             "max_fps=60",
             "video_bit_rate=4000000",
             "video_codec_options=latency=1,priority=0",
@@ -579,6 +623,9 @@ class ScrcpyCapture(QObject):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 # 增大接收缓冲区，减少丢包和拷贝次数
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 0x400000)
+                # 禁用 Nagle 算法，小包立即发送
+                # scrcpy 帧头可能被 Nagle 缓存 ~20ms，禁用后降低传输延迟
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 sock.settimeout(_SCRCPY_SOCKET_TIMEOUT)
                 sock.connect(("127.0.0.1", self._local_port))
                 # 握手阶段保持超时保护，防止 server 不响应时无限阻塞
@@ -839,9 +886,25 @@ class ScrcpyCapture(QObject):
                 except Exception as e2:
                     logger.error("回退到 H.264 解码器也失败: %s", e2)
                     return None
-        # 开启多线程解码（AUTO 模式比默认 SLICE 快 ~5 倍）
-        codec.thread_type = "AUTO"
-        codec.thread_count = 0  # 0 = 自动选择线程数
+        # 尝试启用硬件解码（DXVA2/D3D11VA），失败则回退到软件解码
+        # 硬件解码将 H.264 解码工作卸载到 GPU，延迟从 ~10ms 降到 ~2ms
+        # 解码结果完全相同，零画质损失
+        hw_ctx = None
+        try:
+            hw_ctx = av.HWDeviceContext.create('dxva2')
+            codec.hwaccel = hw_ctx
+            logger.info("启用 DXVA2 硬件解码（GPU 加速）")
+        except (AttributeError, Exception) as e:
+            logger.debug("DXVA2 硬件解码不可用: %s，使用软件解码", e)
+            hw_ctx = None
+
+        # 单线程解码：消除帧重排序延迟
+        # H.264 多线程帧级并行（FRAME threading）需要缓冲 2~4 帧才能并行，
+        # 引入 33~66ms 重排序延迟（@60fps）。单线程解码无此延迟。
+        # 1080p@60 软解单线程通常足够（~15ms/帧余量）。
+        # 零画质损失，仅影响并行策略。
+        codec.thread_count = 1
+
         # 启用低延迟解码，减少 FFmpeg 内部帧重排序缓冲
         try:
             codec.flags |= av.codec.Flags.LOW_DELAY
@@ -854,7 +917,8 @@ class ScrcpyCapture(QObject):
         except Exception as e:
             logger.warning("设置 FAST/skip_loop_filter 失败: %s", e)
 
-        logger.info("PyAV 解码器已启动 (thread_type=AUTO, 支持 H.264/H.265/AV1)")
+        hw_label = "DXVA2 硬解" if hw_ctx is not None else "软解"
+        logger.info("PyAV 解码器已启动 (%s, 单线程, 低延迟, 支持 H.264/H.265/AV1)", hw_label)
 
         # 诊断变量
         loop_start_time = time.monotonic()
@@ -865,8 +929,9 @@ class ScrcpyCapture(QObject):
         try:
             while self._running:
                 # 使用 select 等待数据可读，避免 busy-wait 空转
+                # 超时 2ms（原 10ms），降低空闲时发现新数据的延迟
                 try:
-                    readable, _, _ = select.select([sock], [], [], 0.01)
+                    readable, _, _ = select.select([sock], [], [], 0.002)
                     if not readable:
                         continue
                 except (OSError, ValueError):
@@ -881,7 +946,7 @@ class ScrcpyCapture(QObject):
                     first_frame_received = True  # 只告警一次
 
                 try:
-                    raw_h264 = sock.recv(0x40000)  # 256KB 缓冲区，减少系统调用次数
+                    raw_h264 = sock.recv(0x100000)  # 1MB 缓冲区（原 256KB），减少 syscall 次数
                     recv_count += 1
                     if recv_count <= 3 or recv_count % 100 == 0:
                         logger.debug("scrcpy 接收数据: %d 字节 (第 %d 次)", len(raw_h264), recv_count)
@@ -910,6 +975,12 @@ class ScrcpyCapture(QObject):
                                 latest_frame = frame
                         if latest_frame is not None:
                             try:
+                                # 硬件解码帧需要先从 GPU 转移到 CPU 内存
+                                if hw_ctx is not None:
+                                    try:
+                                        latest_frame = latest_frame.transfer_to(0)
+                                    except Exception:
+                                        pass  # 可能已经是软件帧，直接使用
                                 rgb_frame = latest_frame.reformat(format="rgb24").to_ndarray()
                                 if not first_frame_received or decode_count == 1:
                                     logger.info(

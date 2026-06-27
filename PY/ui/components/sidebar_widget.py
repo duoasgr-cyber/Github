@@ -141,9 +141,13 @@ class SidebarWidget(QWidget):
         return self._collapsed
 
     def update_mini_info(self):
-        """更新折叠模式下的迷你信息。"""
+        """更新折叠模式下的迷你信息。
+
+        注意：只读取 DeviceBindWidget 缓存的在线状态，不同步调用 adb，
+        避免在切换方案等场景下触发子进程导致控制台窗口闪现。
+        """
         serial = self._device_bind._bound_serial
-        online = self._device_bind._is_device_online()
+        online = self._device_bind.online
         if online:
             self._mini_device_dot.setStyleSheet("color: #3fb950; font-size: 16px;")
             self._mini_device_dot.setToolTip(f"设备: {serial} (在线)")
@@ -162,7 +166,10 @@ class SidebarWidget(QWidget):
     # ---- 内部逻辑 -----------------------------------------------------------
 
     def _on_workflow_changed(self, name):
-        self.update_mini_info()
+        # 只在折叠状态下更新迷你信息；展开时迷你信息不可见，跳过可避免
+        # 同步调用 adb devices 而导致的子进程控制台窗口闪现。
+        if self._collapsed:
+            self.update_mini_info()
         self.workflow_changed.emit(name)
 
     def _collapse(self):

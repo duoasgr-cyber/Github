@@ -228,10 +228,10 @@ class TestConnectionSignals:
 
 class TestFrameSignal:
     def test_set_current_frame_no_longer_emits_signal(self, capture, fake_frame):
-        """set_current_frame 不再 emit frame_captured 信号（UI 改用轮询 + 版本号）。
+        """set_current_frame 不再 emit frame_captured 信号（避免重帧数据传递）。
 
-        旧行为：每帧 emit 信号 → Qt 事件队列堆积 → 卡顿
-        新行为：UI 通过 get_current_frame_if_new() 轮询获取新帧
+        frame_captured 信号携带帧数据，高频 emit 会导致 Qt 事件队列堆积。
+        新行为：frame_ready 信号（无参数）通知 UI，UI 通过版本号拉取帧。
         """
         received = {"frame": None, "count": 0}
 
@@ -244,8 +244,27 @@ class TestFrameSignal:
         capture.set_current_frame(fake_frame)
         _app.processEvents()
 
-        # 信号不应被 emit
+        # frame_captured 信号不应被 emit
         assert received["count"] == 0
+
+    def test_set_current_frame_emits_frame_ready(self, capture, fake_frame):
+        """set_current_frame 应 emit frame_ready 信号（信号驱动帧更新）。
+
+        frame_ready 是无参数信号，UI 收到后通过 get_current_frame_if_new() 拉取帧。
+        这替代了固定间隔轮询，将显示唤醒延迟从 0~8ms 降到 ~0ms。
+        """
+        ready_count = {"value": 0}
+
+        def on_ready():
+            ready_count["value"] += 1
+
+        capture.frame_ready.connect(on_ready)
+
+        capture.set_current_frame(fake_frame)
+        _app.processEvents()
+
+        # frame_ready 信号应被 emit
+        assert ready_count["value"] == 1
 
 
 # =========================================================================
@@ -474,27 +493,36 @@ class TestFrameSkipping:
 class TestFramePollingInterval:
     """测试帧轮询间隔优化。"""
 
-    def test_mirror_window_frame_interval_is_16ms(self):
-        """MirrorWindow 帧轮询间隔应为 16ms（~60fps），不是 33ms。"""
-        # _frame_interval 是实例属性，检查 __init__ 源码
+    def test_mirror_window_frame_interval_is_100ms_fallback(self):
+        """MirrorWindow 帧定时器应为 100ms fallback（信号驱动为主）。
+
+        原 16ms 高频轮询已被 frame_ready 信号驱动替代，
+        定时器仅作为 fallback 防止信号丢失时画面停滞。
+        """
         import inspect
 
         from ui.mirror_window import MirrorWindow
 
-        source = inspect.getsource(MirrorWindow.__init__)
-        assert "16" in source and "_frame_interval" in source, "MirrorWindow 帧轮询间隔应 <= 16ms 以支持 60fps"
+        source = inspect.getsource(MirrorWindow.start)
+        # 信号驱动 + 100ms fallback
+        assert "frame_ready" in source, "MirrorWindow 应连接 frame_ready 信号"
+        assert "100" in source, "MirrorWindow fallback 定时器应为 100ms"
 
-    def test_embedded_mirror_frame_interval_is_8ms(self):
-        """EmbeddedMirrorWidget 帧轮询间隔应为 8ms（~120fps）。"""
-        from ui.components.embedded_mirror_widget import EmbeddedMirrorWidget
+    def test_embedded_mirror_uses_frame_ready_signal(self):
+        """EmbeddedMirrorWidget 应使用 frame_ready 信号驱动帧更新。
 
-        widget = EmbeddedMirrorWidget.__new__(EmbeddedMirrorWidget)
-        # 检查 _start_frame_update 中的定时器间隔
-        # 通过检查方法源码或属性
+        原 8ms 高频轮询已被 frame_ready 信号驱动替代，
+        定时器仅作为 100ms fallback。
+        """
         import inspect
 
-        source = inspect.getsource(EmbeddedMirrorWidget._start_frame_update)
-        assert "8" in source or "9" in source, "EmbeddedMirrorWidget 帧轮询间隔应 <= 9ms 以支持 120fps"
+        from ui.components.embedded_mirror_widget import EmbeddedMirrorWidget
+
+        source_connect = inspect.getsource(EmbeddedMirrorWidget._connect_signals)
+        assert "frame_ready" in source_connect, "EmbeddedMirrorWidget 应连接 frame_ready 信号"
+
+        source_timer = inspect.getsource(EmbeddedMirrorWidget._start_frame_update)
+        assert "100" in source_timer, "EmbeddedMirrorWidget fallback 定时器应为 100ms"
 
 
 class TestNoRgbSwapped:
@@ -513,10 +541,13 @@ class TestNoRgbSwapped:
 
 
 class TestNoFrameCapturedSignalEmission:
-    """测试 set_current_frame 不再 emit frame_captured 信号（UI 用轮询）。"""
+    """测试 set_current_frame 不 emit frame_captured 信号（改用 frame_ready）。"""
 
     def test_set_current_frame_does_not_emit_signal(self, capture, fake_frame):
-        """set_current_frame 不应 emit frame_captured 信号。"""
+        """set_current_frame 不应 emit frame_captured 信号（携带帧数据，高频会堆积）。
+
+        frame_ready（无参数）信号替代 frame_captured 用于通知 UI。
+        """
         signal_count = {"value": 0}
 
         def on_frame(frame):
@@ -529,8 +560,8 @@ class TestNoFrameCapturedSignalEmission:
         time.sleep(0.05)
         _app.processEvents()
 
-        # 信号不应被 emit（UI 使用轮询，信号是额外开销）
-        assert signal_count["value"] == 0, "set_current_frame 不应 emit frame_captured，UI 使用轮询获取帧"
+        # frame_captured 不应被 emit
+        assert signal_count["value"] == 0, "set_current_frame 不应 emit frame_captured"
 
 
 class TestGetFrameVersion:
@@ -562,3 +593,16 @@ class TestGetFrameVersion:
         current_version = capture.get_frame_version()
         result = capture.get_current_frame_if_new(last_version=current_version)
         assert result is None
+
+    def test_get_current_frame_if_new_returns_reference_not_copy(self, capture, fake_frame):
+        """get_current_frame_if_new 返回内部引用而非拷贝（性能优化）。
+
+        消除 1080×2400 RGB 帧 ~7.4MB/帧 的内存拷贝。
+        采集线程每次生成新数组，UI 只读不写，返回引用是安全的。
+        """
+        capture.set_current_frame(fake_frame)
+        result = capture.get_current_frame_if_new(last_version=0)
+        assert result is not None
+        frame, version = result
+        # 返回的应是同一个 numpy 数组对象（引用，非拷贝）
+        assert frame is fake_frame, "get_current_frame_if_new 应返回引用而非拷贝"

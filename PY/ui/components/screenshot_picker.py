@@ -197,6 +197,15 @@ class ScreenshotPicker(QWidget):
             if self._device_width == 0 and w > 0:
                 self._device_width = w
                 self._device_height = h
+                # 关键修复：同步设置 view 的设备分辨率，否则 EmbeddedMirrorView._device_width
+                # 始终为 0，导致所有点击被忽略（"点击被忽略: _device_width=0"）
+                self._view.set_device_resolution(w, h)
+            # 如果 view 已通过帧尺寸回退获得分辨率，也同步到自身，
+            # 保证后续 tap 发送和坐标显示使用一致的分辨率。
+            view_w, view_h = self._view.get_device_resolution()
+            if self._device_width == 0 and view_w > 0:
+                self._device_width = view_w
+                self._device_height = view_h
 
     def _on_connection_lost(self):
         """连接断开。"""

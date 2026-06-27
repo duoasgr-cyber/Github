@@ -99,6 +99,9 @@ class MainWindow(QMainWindow):
         self._panels["workflow_editor"].load_workflows()
         self._panels["test"].load_workflows()
         self._restore_tasks()
+        # 在初始化完成后连接面板→侧边栏同步，避免 load_workflows 触发误保存
+        self._panels["workflow_editor"].workflow_selected.connect(self._on_panel_workflow_selected)
+        self._panels["workflow_editor"].step_deleted.connect(lambda _: self._refresh_preview())
 
     def _init_ui(self):
         self.setWindowTitle("三角洲自动抢购工具 v2.0")
@@ -294,7 +297,31 @@ class MainWindow(QMainWindow):
         self._panels["test"].load_workflows()
         self._refresh_preview()
 
+    def _sync_workflow_panel(self, name: str):
+        """将工作流面板的方案选择与给定名称同步（屏蔽信号避免回环）。"""
+        wf_panel = self._panels["workflow_editor"]
+        if hasattr(wf_panel, "_workflow_combo"):
+            wf_panel._workflow_combo.blockSignals(True)
+            idx = wf_panel._workflow_combo.findText(name)
+            if idx >= 0:
+                wf_panel._workflow_combo.setCurrentIndex(idx)
+            wf_panel._workflow_combo.blockSignals(False)
+            wf_panel._current_workflow_name = name
+            wf_panel.refresh_step_list()
+            if hasattr(wf_panel, "_step_editor"):
+                wf_panel._step_editor.clear_step()
+
     def _on_workflow_switched(self, name: str):
+        self._task_state.update_task(self._task_bar.current_task_id(), workflow=name)
+        self._sync_workflow_panel(name)
+        self._refresh_preview()
+        self._save_task_snapshot()
+
+    def _on_panel_workflow_selected(self, name: str):
+        """工作流面板切换方案时，同步侧边栏方案选择器。"""
+        self._workflow_switcher.blockSignals(True)
+        self._workflow_switcher.set_current_workflow(name)
+        self._workflow_switcher.blockSignals(False)
         self._task_state.update_task(self._task_bar.current_task_id(), workflow=name)
         self._refresh_preview()
         self._save_task_snapshot()
@@ -649,9 +676,11 @@ class MainWindow(QMainWindow):
         state = self._task_state.get_task(task_id)
         if not state:
             return
+        workflow_name = state.get("workflow", "")
         self._workflow_switcher.blockSignals(True)
-        self._workflow_switcher.set_current_workflow(state.get("workflow", ""))
+        self._workflow_switcher.set_current_workflow(workflow_name)
         self._workflow_switcher.blockSignals(False)
+        self._sync_workflow_panel(workflow_name)
         self._device_bind.blockSignals(True)
         self._device_bind.set_bound_device(state.get("bound_device", ""), state.get("bound_device_label", ""))
         self._device_bind.blockSignals(False)

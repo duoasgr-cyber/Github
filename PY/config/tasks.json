@@ -4,7 +4,7 @@
     {
       "id": "task_2",
       "title": "任务2",
-      "workflow": "bian_dong",
+      "workflow": "kai",
       "bound_device": "10AF490UQX001CC",
       "bound_device_label": "",
       "selected_step_index": 0

@@ -1,82 +1,5 @@
 {
   "workflows": {
-    "after_buy": {
-      "description": "购买后操作：使用制式卷、卸下装备、转移仓库物品",
-      "device_resolution": {
-        "width": 2400,
-        "height": 1080
-      },
-      "steps": [
-        {
-          "type": "wait",
-          "seconds": 3.0,
-          "comment": "等待购买完成",
-          "display_name": "",
-          "enabled": true
-        },
-        {
-          "type": "tap",
-          "enabled": true,
-          "wait_after": 1.0,
-          "x": 244,
-          "y": 273,
-          "comment": "点制式卷"
-        },
-        {
-          "type": "tap",
-          "x": 1600,
-          "y": 1145,
-          "comment": "点使用",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "x": 2680,
-          "y": 1050,
-          "comment": "点取消制式卷的x",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "x": 2555,
-          "y": 1145,
-          "comment": "点右下角确认",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "enabled": true,
-          "x": 2466,
-          "wait_after": 1.0,
-          "y": 1159,
-          "comment": "点提示的确认"
-        },
-        {
-          "type": "tap",
-          "x": 222,
-          "y": 1150,
-          "comment": "点仓库",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "x": 946,
-          "y": 1150,
-          "comment": "点全部转移",
-          "wait_after": 1
-        },
-        {
-          "type": "keyevent",
-          "key": "4",
-          "comment": "返回"
-        },
-        {
-          "type": "wait",
-          "seconds": 1,
-          "comment": "等待返回完成"
-        }
-      ]
-    },
     "begin": {
       "description": "开始匹配并重启游戏，等待进入入或开界面",
       "device_resolution": {
@@ -99,9 +22,10 @@
         },
         {
           "type": "launch",
+          "enabled": false,
           "package": "com.tencent.tmgp.dfm",
-          "comment": "启动三角洲",
-          "wait_after": 25
+          "wait_after": 25.0,
+          "comment": "启动三角洲"
         },
         {
           "type": "loop",
@@ -542,41 +466,6 @@
         }
       ]
     },
-    "fin": {
-      "description": "结束流程：备战、开始、选方案（省去选择地图步骤）",
-      "device_resolution": {
-        "width": 2400,
-        "height": 1080
-      },
-      "steps": [
-        {
-          "type": "wait",
-          "seconds": 1,
-          "comment": "等待"
-        },
-        {
-          "type": "tap",
-          "x": 2392,
-          "y": 1138,
-          "comment": "点备战",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "x": 2408,
-          "y": 975,
-          "comment": "开始",
-          "wait_after": 1
-        },
-        {
-          "type": "tap",
-          "x": 1978,
-          "y": 1141,
-          "comment": "点方案",
-          "wait_after": 0.5
-        }
-      ]
-    },
     "restart": {
       "description": "重新启动三角洲游戏",
       "device_resolution": {
@@ -843,10 +732,11 @@
         },
         {
           "type": "tap",
-          "x": 1320,
-          "y": 970,
-          "comment": "点掉3x3提示",
-          "wait_after": 2
+          "enabled": true,
+          "y": 884,
+          "x": 1272,
+          "wait_after": 2.0,
+          "comment": "点掉3x3提示"
         },
         {
           "type": "tap",

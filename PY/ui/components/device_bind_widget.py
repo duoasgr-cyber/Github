@@ -35,6 +35,7 @@ class DeviceBindWidget(QWidget):
         self._bound_serial = ""
         self._bound_label = ""
         self._mirror_active = False
+        self._online = False  # 缓存的设备在线状态，由 _refresh_display 定时更新
         self._init_ui()
         self._start_poll()
 
@@ -88,6 +89,7 @@ class DeviceBindWidget(QWidget):
 
     def _refresh_display(self):
         if not self._bound_serial:
+            self._online = False
             self._info_label.setText("未选择设备")
             self._status_dot.setStyleSheet("color: #8b949e; font-size: 14px;")
             self._btn_select.setText("选择")
@@ -96,6 +98,7 @@ class DeviceBindWidget(QWidget):
             return
 
         online = self._is_device_online()
+        self._online = online  # 缓存在线状态，供 update_mini_info 等读取，避免同步调用 adb
         display = self._bound_label if self._bound_label else self._bound_serial
         self._info_label.setText(display)
         if online:
@@ -117,6 +120,11 @@ class DeviceBindWidget(QWidget):
             return self._bound_serial in serials
         except Exception:
             return False
+
+    @property
+    def online(self) -> bool:
+        """返回缓存的设备在线状态（由定时器刷新，不触发 adb 调用）。"""
+        return self._online
 
     def _start_poll(self):
         self._timer = QTimer(self)

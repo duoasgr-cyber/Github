@@ -855,40 +855,49 @@ class StepEditor(QWidget):
             return
         step_type = self._current_step.get("type", "")
 
-        if step_type in ("tap", "long_press", "tap_point"):
-            if "x" in self._field_widgets:
-                w = self._field_widgets["x"]
-                if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                    w.setValue(x)
-            if "y" in self._field_widgets:
-                w = self._field_widgets["y"]
-                if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                    w.setValue(y)
+        # 屏蔽字段信号，避免每个 setValue 各触发一次 step_changed/set_workflow，
+        # 导致一次拾取写入多份 workflows.json（x/y 各一次保存）。
+        self._updating = True
+        try:
+            if step_type in ("tap", "long_press", "tap_point"):
+                if "x" in self._field_widgets:
+                    w = self._field_widgets["x"]
+                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                        w.setValue(x)
+                if "y" in self._field_widgets:
+                    w = self._field_widgets["y"]
+                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                        w.setValue(y)
 
-        elif step_type == "swipe":
-            if self._swipe_pickup_phase == 1:
-                # First click: set start point, switch to phase 2
-                if "x1" in self._field_widgets:
-                    w = self._field_widgets["x1"]
-                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                        w.setValue(x)
-                if "y1" in self._field_widgets:
-                    w = self._field_widgets["y1"]
-                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                        w.setValue(y)
-                self._swipe_pickup_phase = 2
-                self._swipe_reenter_pending = True
-            elif self._swipe_pickup_phase == 2:
-                # Second click: set end point, reset phase
-                if "x2" in self._field_widgets:
-                    w = self._field_widgets["x2"]
-                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                        w.setValue(x)
-                if "y2" in self._field_widgets:
-                    w = self._field_widgets["y2"]
-                    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                        w.setValue(y)
-                self._swipe_pickup_phase = 0
+            elif step_type == "swipe":
+                if self._swipe_pickup_phase == 1:
+                    # First click: set start point, switch to phase 2
+                    if "x1" in self._field_widgets:
+                        w = self._field_widgets["x1"]
+                        if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                            w.setValue(x)
+                    if "y1" in self._field_widgets:
+                        w = self._field_widgets["y1"]
+                        if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                            w.setValue(y)
+                    self._swipe_pickup_phase = 2
+                    self._swipe_reenter_pending = True
+                elif self._swipe_pickup_phase == 2:
+                    # Second click: set end point, reset phase
+                    if "x2" in self._field_widgets:
+                        w = self._field_widgets["x2"]
+                        if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                            w.setValue(x)
+                    if "y2" in self._field_widgets:
+                        w = self._field_widgets["y2"]
+                        if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                            w.setValue(y)
+                    self._swipe_pickup_phase = 0
+        finally:
+            self._updating = False
+
+        # 字段批量更新完成后，统一 emit 一次 step_changed
+        self._on_field_changed()
 
     def is_sync_tap_checked(self) -> bool:
         """返回「同步tap」勾选框状态。"""
