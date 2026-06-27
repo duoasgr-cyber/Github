@@ -314,18 +314,24 @@ class ScrcpyCapture(QObject):
                 self._handle_connection_lost()
 
     def _handle_decoded_frame(self, frame, gen: int):
-        """处理 PyAV 解码出的 VideoFrame，转 ndarray 后缓存/emit。"""
+        """处理 PyAV 解码出的 VideoFrame，转 ndarray 后缓存/emit。
+
+        节流位置上移：未到 emit 间隔则跳过昂贵的 to_ndarray 转换，
+        仅首帧用于解析宽高。被跳过的帧仍正常参与 H.264 参考解码，
+        _current_frame 最多 ~_FRAME_EMIT_INTERVAL 陈旧，可接受。
+        """
         if self._frame_w == 0 and frame.width > 0:
             self._frame_w = frame.width
             self._frame_h = frame.height
             logger.debug("PyAV 解析分辨率: %dx%d", self._frame_w, self._frame_h)
+        now = time.monotonic()
+        if now - self._last_emit_time < _FRAME_EMIT_INTERVAL:
+            return
+        self._last_emit_time = now
         arr = frame.to_ndarray(format="bgr24")
         with self._frame_lock:
             self._current_frame = arr
-        now = time.monotonic()
-        if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
-            self._last_emit_time = now
-            self.frame_captured.emit(arr)
+        self.frame_captured.emit(arr)
 
     def _remote_jar_matches_local(self) -> bool:
         """校验远端 scrcpy-server.jar 大小与本地一致，用于跳过重复 push。"""
@@ -532,18 +538,19 @@ class ScrcpyCapture(QObject):
                     break
 
                 while len(buf) >= frame_size:
+                    now = time.monotonic()
+                    if now - self._last_emit_time < _FRAME_EMIT_INTERVAL:
+                        # 命中节流：只消费缓冲（避免堆积），跳过拷贝与 numpy 构造
+                        del buf[:frame_size]
+                        continue
+                    self._last_emit_time = now
                     raw = bytes(buf[:frame_size])
                     del buf[:frame_size]
                     frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 4)
                     frame = frame[:, :, :3]
-
                     with self._frame_lock:
                         self._current_frame = frame
-
-                    now = time.monotonic()
-                    if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
-                        self._last_emit_time = now
-                        self.frame_captured.emit(frame)
+                    self.frame_captured.emit(frame)
         except Exception as e:
             if not self._stopping:
                 logger.error("帧解码线程异常 [gen=%d]: %s", gen, e)
