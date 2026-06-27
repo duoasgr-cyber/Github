@@ -12,6 +12,13 @@ import numpy as np
 import cv2
 from PyQt5.QtCore import QObject, pyqtSignal
 
+try:
+    import av as _av
+    _HAS_PYAV = True
+except ImportError:
+    _av = None
+    _HAS_PYAV = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,8 @@ class ScrcpyCapture(QObject):
         self._frame_w: int = 0
         self._frame_h: int = 0
         self._cast_options: CastOptions = CastOptions()
+        self._use_pyav: bool = _HAS_PYAV
+        self._av_codec = None
 
     def start(
         self,
@@ -240,8 +249,83 @@ class ScrcpyCapture(QObject):
         if not codec_info:
             raise RuntimeError("鏃犳硶璇诲彇缂栫爜淇℃伅")
 
-        self._start_ffmpeg_and_threads()
+        self._start_decoder_pipeline()
         return True
+
+    def _start_decoder_pipeline(self):
+        """解码管线分发：优先 PyAV 进程内解码，失败回退 ffmpeg rawvideo。"""
+        if self._use_pyav:
+            try:
+                self._start_pyav_decoder()
+                return
+            except Exception as e:
+                logger.warning("PyAV 解码初始化失败，回退到 ffmpeg: %s", e)
+                self._use_pyav = False
+                self._av_codec = None
+        self._start_ffmpeg_and_threads()
+
+    def _start_pyav_decoder(self):
+        self._generation += 1
+        gen = self._generation
+        codec_name = self._cast_options.video_codec
+        try:
+            self._av_codec = _av.CodecContext.create(codec_name, "r")
+        except Exception as e:
+            raise RuntimeError(f"PyAV 创建 {codec_name} 解码器失败: {e}")
+        self._frame_w = 0
+        self._frame_h = 0
+        self._writer_thread = threading.Thread(
+            target=self._pyav_decode_loop, args=(gen,), daemon=True
+        )
+        self._writer_thread.start()
+
+    def _pyav_decode_loop(self, gen: int):
+        logger.debug("PyAV 解码线程启动 [gen=%d]", gen)
+        codec = self._av_codec
+        try:
+            while not self._stopping and self._generation == gen:
+                pts_data = self._recv_exact(8)
+                if not pts_data:
+                    break
+                size_data = self._recv_exact(4)
+                if not size_data:
+                    break
+                packet_size = struct.unpack(">I", size_data)[0]
+                if packet_size == 0:
+                    continue
+                if packet_size > _MAX_PACKET_SIZE:
+                    logger.warning("异常包大小: %d, 跳过", packet_size)
+                    continue
+                h264_data = self._recv_exact(packet_size)
+                if not h264_data:
+                    break
+                try:
+                    for packet in codec.parse(h264_data):
+                        for frame in codec.decode(packet):
+                            self._handle_decoded_frame(frame, gen)
+                except Exception as e:
+                    logger.debug("PyAV 解码单包异常 [gen=%d]: %s", gen, e)
+        except Exception as e:
+            if not self._stopping:
+                logger.error("PyAV 解码线程异常 [gen=%d]: %s", gen, e)
+        finally:
+            logger.debug("PyAV 解码线程结束 [gen=%d]", gen)
+            if not self._stopping and self._generation == gen:
+                self._handle_connection_lost()
+
+    def _handle_decoded_frame(self, frame, gen: int):
+        """处理 PyAV 解码出的 VideoFrame，转 ndarray 后缓存/emit。"""
+        if self._frame_w == 0 and frame.width > 0:
+            self._frame_w = frame.width
+            self._frame_h = frame.height
+            logger.debug("PyAV 解析分辨率: %dx%d", self._frame_w, self._frame_h)
+        arr = frame.to_ndarray(format="bgr24")
+        with self._frame_lock:
+            self._current_frame = arr
+        now = time.monotonic()
+        if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
+            self._last_emit_time = now
+            self.frame_captured.emit(arr)
 
     def _remote_jar_matches_local(self) -> bool:
         """校验远端 scrcpy-server.jar 大小与本地一致，用于跳过重复 push。"""
@@ -593,6 +677,7 @@ class ScrcpyCapture(QObject):
             self._writer_thread = None
             self._decoder_thread = None
             self._fallback_thread = None
+            self._av_codec = None
 
             if self._device_serial:
                 subprocess.run(
