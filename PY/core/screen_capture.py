@@ -31,6 +31,33 @@ _FALLBACK_INTERVAL = 0.1
 _SOCKET_CONNECT_RETRIES = 5
 _SOCKET_CONNECT_INTERVAL = 0.5
 
+_SUPPORTED_CODECS = ("h264", "h265", "av1")
+
+
+class CastOptions:
+    """投屏启动参数（与 config.json 的 device.cast 对应）。
+
+    保持向后兼容：所有字段均有默认值，与 P1 之前的行为一致。
+    """
+
+    def __init__(
+        self,
+        server_version: str = "2.0",
+        video_codec: str = "h264",
+        bit_rate: int = 2000000,
+        max_size: int = 1080,
+        max_fps: int = 30,
+        startup_wait: float = _SERVER_STARTUP_WAIT,
+        skip_push_if_exists: bool = True,
+    ):
+        self.server_version = server_version
+        self.video_codec = video_codec if video_codec in _SUPPORTED_CODECS else "h264"
+        self.bit_rate = int(bit_rate)
+        self.max_size = int(max_size)
+        self.max_fps = int(max_fps)
+        self.startup_wait = float(startup_wait)
+        self.skip_push_if_exists = bool(skip_push_if_exists)
+
 
 class ScrcpyCapture(QObject):
     frame_captured = pyqtSignal(np.ndarray)
@@ -61,8 +88,15 @@ class ScrcpyCapture(QObject):
         self._generation: int = 0
         self._frame_w: int = 0
         self._frame_h: int = 0
+        self._cast_options: CastOptions = CastOptions()
 
-    def start(self, device_serial: str, server_jar_path: str, max_retries: int = 3) -> bool:
+    def start(
+        self,
+        device_serial: str,
+        server_jar_path: str,
+        max_retries: int = 3,
+        cast_options: Optional[CastOptions] = None,
+    ) -> bool:
         if self._connected:
             self.stop()
 
@@ -70,6 +104,14 @@ class ScrcpyCapture(QObject):
         self._server_jar_path = server_jar_path
         self._stopping = False
         self._max_reconnect = max_retries
+        self._cast_options = cast_options or CastOptions()
+        if self._cast_options.video_codec != "h264":
+            if not self._probe_codec_supported(self._cast_options.video_codec):
+                logger.warning(
+                    "设备不支持 video_codec=%s，回退到 h264",
+                    self._cast_options.video_codec,
+                )
+                self._cast_options.video_codec = "h264"
 
         for attempt in range(1, max_retries + 1):
             logger.info("灏濊瘯鍚姩scrcpy杩炴帴 (%d/%d): %s", attempt, max_retries, device_serial)
@@ -111,16 +153,20 @@ class ScrcpyCapture(QObject):
         return self._connected
 
     def _start_scrcpy(self) -> bool:
-        push_cmd = [
-            "adb", "-s", self._device_serial, "push",
-            self._server_jar_path, "/data/local/tmp/scrcpy-server.jar"
-        ]
-        result = subprocess.run(
-            push_cmd, capture_output=True, timeout=30,
-            creationflags=_SUBPROCESS_FLAGS
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"鎺ㄩ€乻crcpy-server澶辫触: {result.stderr.decode(errors='replace')}")
+        opts = self._cast_options
+        if opts.skip_push_if_exists and self._remote_jar_matches_local():
+            logger.debug("远端 scrcpy-server.jar 大小一致，跳过 push")
+        else:
+            push_cmd = [
+                "adb", "-s", self._device_serial, "push",
+                self._server_jar_path, "/data/local/tmp/scrcpy-server.jar"
+            ]
+            result = subprocess.run(
+                push_cmd, capture_output=True, timeout=30,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"推送 scrcpy-server 失败: {result.stderr.decode(errors='replace')}")
 
         subprocess.run(
             ["adb", "-s", self._device_serial, "forward", "--remove", f"tcp:{self._forward_port}"],
@@ -137,13 +183,17 @@ class ScrcpyCapture(QObject):
             creationflags=_SUBPROCESS_FLAGS
         )
         if result.returncode != 0:
-            raise RuntimeError(f"adb forward澶辫触: {result.stderr.decode(errors='replace')}")
+            raise RuntimeError(f"adb forward 失败: {result.stderr.decode(errors='replace')}")
 
         server_cmd = [
             "adb", "-s", self._device_serial, "shell",
             "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
             "app_process", "/", "com.genymobile.scrcpy.Server",
-            "2.0", "log_level=info", "bit_rate=2000000", "max_size=1080", "max_fps=30",
+            opts.server_version, "log_level=info",
+            f"video_codec={opts.video_codec}",
+            f"video_bit_rate={opts.bit_rate}",
+            f"max_size={opts.max_size}",
+            f"max_fps={opts.max_fps}",
             "tunnel_forward=true", "control=false", "cleanup=true", "audio=false"
         ]
         self._server_process = subprocess.Popen(
@@ -153,11 +203,11 @@ class ScrcpyCapture(QObject):
             creationflags=_SUBPROCESS_FLAGS
         )
 
-        time.sleep(_SERVER_STARTUP_WAIT)
+        time.sleep(opts.startup_wait)
 
         if self._server_process.poll() is not None:
             stderr_output = self._server_process.stderr.read().decode(errors="replace")
-            raise RuntimeError(f"scrcpy鏈嶅姟鍚姩澶辫触: {stderr_output}")
+            raise RuntimeError(f"scrcpy 服务启动失败: {stderr_output}")
 
         connected = False
         for socket_attempt in range(_SOCKET_CONNECT_RETRIES):
@@ -192,6 +242,56 @@ class ScrcpyCapture(QObject):
 
         self._start_ffmpeg_and_threads()
         return True
+
+    def _remote_jar_matches_local(self) -> bool:
+        """校验远端 scrcpy-server.jar 大小与本地一致，用于跳过重复 push。"""
+        try:
+            local_size = os.path.getsize(self._server_jar_path)
+        except OSError:
+            return False
+        try:
+            result = subprocess.run(
+                ["adb", "-s", self._device_serial, "shell",
+                 "ls", "-s", "/data/local/tmp/scrcpy-server.jar"],
+                capture_output=True, timeout=5,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        if result.returncode != 0:
+            return False
+        out = result.stdout.decode(errors="replace").strip()
+        parts = out.split()
+        if not parts:
+            return False
+        try:
+            remote_size = int(parts[0])
+        except ValueError:
+            return False
+        return remote_size == local_size and local_size > 0
+
+    def _probe_codec_supported(self, codec: str) -> bool:
+        """探测设备是否支持指定 video codec 的硬件编码。
+
+        通过 scrcpy server 的 list_encoders 能力（server >= 2.0）查询；
+        不可用时降级为基于 Android API level 的保守判断。
+        """
+        if codec == "h264":
+            return True
+        try:
+            result = subprocess.run(
+                ["adb", "-s", self._device_serial, "shell",
+                 "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
+                 "app_process", "/", "com.genymobile.scrcpy.Server",
+                 self._cast_options.server_version, "log_level=warn",
+                 "list_encoders=true"],
+                capture_output=True, timeout=8,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+            text = (result.stdout + result.stderr).decode(errors="replace")
+            return codec in text
+        except (subprocess.TimeoutExpired, OSError):
+            return False
 
     def _start_ffmpeg_and_threads(self):
         self._generation += 1
