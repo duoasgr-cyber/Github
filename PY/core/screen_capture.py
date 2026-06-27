@@ -141,7 +141,7 @@ class ScrcpyCapture(QObject):
             "adb", "-s", self._device_serial, "shell",
             "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
             "app_process", "/", "com.genymobile.scrcpy.Server",
-            "2.0", "log_level=info", "bit_rate=2000000", "max_size=1080",
+            "2.0", "log_level=info", "bit_rate=2000000", "max_size=1080", "max_fps=30",
             "tunnel_forward=true", "control=false", "cleanup=true", "audio=false"
         ]
         self._server_process = subprocess.Popen(
@@ -161,6 +161,7 @@ class ScrcpyCapture(QObject):
         for socket_attempt in range(_SOCKET_CONNECT_RETRIES):
             try:
                 self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
                 self._socket.settimeout(5)
                 self._socket.connect(("127.0.0.1", self._forward_port))
                 self._socket.settimeout(2)
@@ -295,7 +296,7 @@ class ScrcpyCapture(QObject):
         try:
             while not self._stopping and self._generation == gen and self._ffmpeg_process:
                 try:
-                    data = self._ffmpeg_process.stdout.read(4096)
+                    data = self._ffmpeg_process.stdout.read(1 << 20)
                     if not data:
                         break
                     buf += data
@@ -324,12 +325,12 @@ class ScrcpyCapture(QObject):
                     )
                     if frame is not None:
                         with self._frame_lock:
-                            self._current_frame = frame.copy()
+                            self._current_frame = frame
 
                         now = time.monotonic()
                         if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
                             self._last_emit_time = now
-                            self.frame_captured.emit(frame.copy())
+                            self.frame_captured.emit(frame)
         except Exception as e:
             if not self._stopping:
                 logger.error("甯цВ鐮佺嚎绋嬪紓甯?[gen=%d]: %s", gen, e)
@@ -351,7 +352,7 @@ class ScrcpyCapture(QObject):
                     now = time.monotonic()
                     if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
                         self._last_emit_time = now
-                        self.frame_captured.emit(frame.copy())
+                        self.frame_captured.emit(frame)
                 time.sleep(_FALLBACK_INTERVAL)
             except Exception as e:
                 logger.error("screencap鍥為€€妯″紡鍑洪敊: %s", e)

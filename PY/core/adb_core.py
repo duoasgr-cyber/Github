@@ -211,7 +211,7 @@ class AdbCore:
                 "1.25",
                 "log_level=info",
                 "max_size=1920",
-                "max_fps=60",
+                "max_fps=30",
                 "tunnel_forward=true",
                 "control=false",
                 "cleanup=true"

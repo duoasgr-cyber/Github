@@ -326,7 +326,10 @@ class ScreenshotPicker(QWidget):
     def _display_frame(self, frame: np.ndarray):
         h, w, ch = frame.shape
         bytes_per_line = ch * w
-        q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+        if hasattr(QImage, "Format_BGR888"):
+            q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888)
+        else:
+            q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
         pixmap = QPixmap.fromImage(q_img)
         self._image_label.set_pixmap(pixmap)
 
