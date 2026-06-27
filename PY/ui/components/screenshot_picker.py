@@ -84,8 +84,8 @@ class _ImageLabel(QLabel):
         if pw == 0 or ph == 0:
             return ix, iy
         bw, bh = self._base_resolution
-        dev_x = int(ix * bw / pw)
-        dev_y = int(iy * bh / ph)
+        dev_x = int(round(ix * bw / pw))
+        dev_y = int(round(iy * bh / ph))
         return dev_x, dev_y
 
     def _device_to_img(self, dev_x: int, dev_y: int) -> tuple[int, int]:
@@ -237,9 +237,11 @@ class ScreenshotPicker(QWidget):
     point_selected = pyqtSignal(int, int)
     mouse_moved = pyqtSignal(int, int)
 
-    def __init__(self, screen_capture=None, parent=None):
+    def __init__(self, screen_capture=None, device_manager=None, config_manager=None, parent=None):
         super().__init__(parent)
         self._screen_capture = screen_capture
+        self._device_manager = device_manager
+        self._config_manager = config_manager
         self._setup_ui()
 
     def _setup_ui(self):
@@ -328,7 +330,51 @@ class ScreenshotPicker(QWidget):
         bytes_per_line = ch * w
         q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
         pixmap = QPixmap.fromImage(q_img)
+        self._sync_base_resolution(w, h)
         self._image_label.set_pixmap(pixmap)
+
+    def _sync_base_resolution(self, frame_w: int, frame_h: int):
+        """Ensure base_resolution matches the device's real resolution in the
+        frame's orientation.
+
+        The captured frame is pre-scaled by scrcpy/screencap and rendered in
+        the device's current orientation. The image-pixel -> device-pixel
+        mapping in _img_to_device is only correct when base_resolution equals
+        the real device resolution AND shares the frame's orientation. Without
+        this sync, base_resolution stays at the hardcoded default and the
+        computed device coordinates land in the wrong place.
+        """
+        dw, dh = 0, 0
+
+        if self._device_manager is not None:
+            try:
+                res = self._device_manager.get_device_resolution()
+            except Exception:
+                res = None
+            if res:
+                dw, dh = res
+
+        if (dw <= 0 or dh <= 0) and self._config_manager is not None:
+            try:
+                base = self._config_manager.get_config("device.base_resolution", {}) or {}
+            except Exception:
+                base = {}
+            if isinstance(base, dict):
+                bw_cfg = base.get("width", 0)
+                bh_cfg = base.get("height", 0)
+                if bw_cfg > 0 and bh_cfg > 0:
+                    dw, dh = bw_cfg, bh_cfg
+
+        if dw <= 0 or dh <= 0:
+            # No reliable source available; keep current base_resolution.
+            return
+
+        # wm size reports the natural orientation, but the frame is captured in
+        # the device's current orientation. Align them so X/Y are not swapped.
+        if (frame_w >= frame_h) != (dw >= dh):
+            dw, dh = dh, dw
+
+        self._image_label.set_base_resolution(dw, dh)
 
     def clear_markers(self):
         self._image_label.clear_markers()

@@ -91,10 +91,11 @@ class WorkflowPanel(QWidget):
     step_deleted = pyqtSignal(int)
     step_moved = pyqtSignal(int, int)
 
-    def __init__(self, config_manager: ConfigManager, screen_capture=None, parent=None):
+    def __init__(self, config_manager: ConfigManager, screen_capture=None, device_manager=None, parent=None):
         super().__init__(parent)
         self._config_manager = config_manager
         self._screen_capture = screen_capture
+        self._device_manager = device_manager
         self._current_workflow_name: str = ""
         self._setup_ui()
         self._connect_signals()
@@ -180,7 +181,12 @@ class WorkflowPanel(QWidget):
         self._step_editor = StepEditor(config_manager=self._config_manager, parent=self)
         right_layout.addWidget(self._step_editor, stretch=3)
 
-        self._screenshot_picker = ScreenshotPicker(screen_capture=self._screen_capture, parent=self)
+        self._screenshot_picker = ScreenshotPicker(
+            screen_capture=self._screen_capture,
+            device_manager=self._device_manager,
+            config_manager=self._config_manager,
+            parent=self,
+        )
         self._screenshot_picker.setMinimumWidth(240)
         right_layout.addWidget(self._screenshot_picker, stretch=2)
 

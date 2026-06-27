@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
 
         self._stacked = QStackedWidget()
         self._panels = {
-            "workflow_editor": WorkflowPanel(self._config_manager, self._screen_capture),
+            "workflow_editor": WorkflowPanel(self._config_manager, self._screen_capture, device_manager=self._device_manager),
             "configuration": ConfigPanel(self._config_manager),
             "device_management": DevicePanel(self._device_manager, self._adb_core),
             "status_monitor": StatusPanel(),
@@ -189,7 +189,11 @@ class MainWindow(QMainWindow):
         for _, key in self.NAV_ITEMS:
             self._stacked.addWidget(self._panels[key])
 
-        self._screenshot_picker = ScreenshotPicker(screen_capture=self._screen_capture)
+        self._screenshot_picker = ScreenshotPicker(
+            screen_capture=self._screen_capture,
+            device_manager=self._device_manager,
+            config_manager=self._config_manager,
+        )
 
         # empty state for screenshot area
         self._ss_empty = EmptyStateWidget(
