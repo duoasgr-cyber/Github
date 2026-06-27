@@ -142,8 +142,8 @@ STEP_FIELD_GROUPS = {
     "condition": [
         ("basic", ["enabled", "display_name"]),
         ("flow",  ["check"]),
-        ("flow",  ["then_steps"]),
-        ("flow",  ["else_steps"]),
+        ("flow",  ["then_mode", "then_workflow", "then_steps"]),
+        ("flow",  ["else_mode", "else_workflow", "else_steps"]),
         ("post",  ["comment"]),
     ],
     "loop": [
@@ -201,8 +201,12 @@ FIELD_LABELS = {
     "region": "区域",
     "workflow": "工作流",
     "check": "条件",
-    "then_steps": "满足步骤",
-    "else_steps": "不满足步骤",
+    "then_mode": "满足时",
+    "then_workflow": "满足-工作流",
+    "then_steps": "满足-步骤",
+    "else_mode": "不满足时",
+    "else_workflow": "不满足-工作流",
+    "else_steps": "不满足-步骤",
     "max_count": "最大次数",
     "steps": "步骤",
     "text": "文本",
@@ -223,6 +227,13 @@ COMBO_FIELDS = {"action", "workflow", "var_type"}
 BOOL_FIELDS = {"enabled"}
 CHECKBOX_FIELDS = {"enabled"}
 
+# condition 分支模式字段：满足/不满足时，选择"内嵌步骤"还是"调用工作流"
+BRANCH_MODE_FIELDS = {"then_mode", "else_mode"}
+BRANCH_WORKFLOW_FIELDS = {"then_workflow", "else_workflow"}
+BRANCH_STEPS_FIELDS = {"then_steps", "else_steps"}
+BRANCH_MODE_EMBEDDED = "内嵌步骤"
+BRANCH_MODE_WORKFLOW = "调用工作流"
+
 
 class StepEditor(QScrollArea):
     step_changed = pyqtSignal(dict)
@@ -234,6 +245,7 @@ class StepEditor(QScrollArea):
         self._current_step = {}
         self._current_index = -1
         self._field_widgets = {}
+        self._field_labels = {}
         self._active_pick_group = None
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -291,6 +303,7 @@ class StepEditor(QScrollArea):
                 w.deleteLater()
 
         self._field_widgets.clear()
+        self._field_labels.clear()
         self._active_pick_group = None
 
         step_type = self._current_step.get("type", "")
@@ -315,11 +328,15 @@ class StepEditor(QScrollArea):
                 group_widget.form_layout.addRow(
                     "{}:".format(label_text), widget
                 )
+                self._field_labels[field_name] = group_widget.form_layout.labelForField(widget)
                 value = self._current_step.get(field_name)
                 self._set_field_value(widget, field_name, value)
 
             group_widget.pick_requested.connect(self._on_pick_requested)
             self._form_layout.addWidget(group_widget)
+
+        # condition 分支模式联动显示
+        self._apply_branch_visibility()
 
     def _on_pick_requested(self, group_key):
         self._active_pick_group = group_key
@@ -330,6 +347,31 @@ class StepEditor(QScrollArea):
             cb = QCheckBox()
             cb.stateChanged.connect(lambda: self._on_field_changed())
             return cb
+
+        # condition 分支模式：内嵌步骤 / 调用工作流
+        if field_name in BRANCH_MODE_FIELDS:
+            combo = QComboBox()
+            combo.setFont(QFont("Microsoft YaHei", 9))
+            combo.addItems([BRANCH_MODE_EMBEDDED, BRANCH_MODE_WORKFLOW])
+            combo.currentIndexChanged.connect(lambda: self._on_branch_mode_changed(field_name))
+            return combo
+
+        # condition 分支调用的工作流名
+        if field_name in BRANCH_WORKFLOW_FIELDS:
+            combo = QComboBox()
+            combo.setFont(QFont("Microsoft YaHei", 9))
+            if self._config_manager:
+                workflows = self._config_manager.get_all_workflows()
+                combo.addItems(sorted(workflows.keys()) if isinstance(workflows, dict) else workflows)
+            combo.currentIndexChanged.connect(lambda: self._on_field_changed())
+            return combo
+
+        # condition 分支内嵌步骤列表（只读计数展示）
+        if field_name in BRANCH_STEPS_FIELDS:
+            label = QLabel("0 个步骤")
+            label.setFont(QFont("Microsoft YaHei", 9))
+            label.setStyleSheet("color: #8b949e;")
+            return label
 
         if field_name in COMBO_FIELDS:
             combo = QComboBox()
@@ -394,6 +436,10 @@ class StepEditor(QScrollArea):
             widget.setValue(int(value) if value is not None else 0)
         elif isinstance(widget, QDoubleSpinBox):
             widget.setValue(float(value) if value is not None else 0.0)
+        elif isinstance(widget, QLabel) and field_name in BRANCH_STEPS_FIELDS:
+            # 内嵌步骤列表：只读展示步骤数量
+            count = len(value) if isinstance(value, list) else 0
+            widget.setText("{} 个步骤".format(count))
         elif isinstance(widget, QLineEdit):
             text = str(value) if value is not None else ""
             if field_name == "region" and isinstance(value, dict):
@@ -412,6 +458,9 @@ class StepEditor(QScrollArea):
             return widget.value()
         if isinstance(widget, QDoubleSpinBox):
             return widget.value()
+        if isinstance(widget, QLabel) and field_name in BRANCH_STEPS_FIELDS:
+            # 内嵌步骤列表不可直接编辑，保留原值
+            return self._current_step.get(field_name, [])
         if isinstance(widget, QLineEdit):
             text = widget.text()
             if field_name == "region":
@@ -433,6 +482,30 @@ class StepEditor(QScrollArea):
             updated[field_name] = self._get_field_value(widget, field_name)
         self._current_step = updated
         self._save_timer.start()
+
+    def _on_branch_mode_changed(self, mode_field):
+        self._on_field_changed()
+        self._apply_branch_visibility()
+
+    def _apply_branch_visibility(self):
+        """根据 then_mode/else_mode 显示对应的工作流行或步骤行，隐藏另一行。"""
+        for branch in ("then", "else"):
+            mode_widget = self._field_widgets.get("{}_mode".format(branch))
+            wf_widget = self._field_widgets.get("{}_workflow".format(branch))
+            steps_widget = self._field_widgets.get("{}_steps".format(branch))
+            wf_label = self._field_labels.get("{}_workflow".format(branch))
+            steps_label = self._field_labels.get("{}_steps".format(branch))
+            if not mode_widget:
+                continue
+            is_workflow_mode = mode_widget.currentText() == BRANCH_MODE_WORKFLOW
+            if wf_widget:
+                wf_widget.setVisible(is_workflow_mode)
+            if wf_label:
+                wf_label.setVisible(is_workflow_mode)
+            if steps_widget:
+                steps_widget.setVisible(not is_workflow_mode)
+            if steps_label:
+                steps_label.setVisible(not is_workflow_mode)
 
     def _emit_step_changed(self):
         self.step_changed.emit(dict(self._current_step))

@@ -36,7 +36,7 @@ STEP_TYPES = [
     ("ocr_region", "OCR识别", {"type": "ocr_region", "region": {"left": 0, "top": 0, "right": 0, "bottom": 0}, "comment": ""}),
     ("tap_point", "精确点击", {"type": "tap_point", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
     ("call_workflow", "调用工作流", {"type": "call_workflow", "workflow": "", "comment": ""}),
-    ("condition", "条件判断", {"type": "condition", "check": {}, "then_steps": [], "else_steps": [], "comment": ""}),
+    ("condition", "条件判断", {"type": "condition", "check": {}, "then_mode": "内嵌步骤", "then_steps": [], "then_workflow": "", "else_mode": "内嵌步骤", "else_steps": [], "else_workflow": "", "comment": ""}),
     ("loop", "循环", {"type": "loop", "max_count": 10, "condition": {}, "steps": [], "comment": ""}),
     ("input_text", "输入文本", {"type": "input_text", "enabled": True, "display_name": "", "text": "", "comment": ""}),
     ("variable", "变量处理", {"type": "variable", "enabled": True, "display_name": "", "var_name": "", "var_type": "string", "var_value": "", "comment": ""}),

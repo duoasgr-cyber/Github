@@ -7,7 +7,7 @@ import traceback
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QStatusBar, QLabel, QSystemTrayIcon,
-    QMenu, QAction, QSizePolicy, QApplication, QSplitter
+    QMenu, QAction, QSizePolicy, QApplication, QPushButton, QSplitter
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QFont
@@ -21,6 +21,7 @@ from core.step_executor import StepExecutor
 from core.logger import setup_logging
 from ui.panels.log_panel import LogPanel, QtLogHandler
 from ui.panels.workflow_panel import WorkflowPanel
+from ui.panels.main_flow_panel import MainFlowPanel
 from ui.panels.config_panel import ConfigPanel
 from ui.panels.device_panel import DevicePanel
 from ui.panels.status_panel import StatusPanel
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
 
     NAV_ITEMS = [
         ("工作流编辑", "workflow_editor"),
+        ("主流程", "main_flow"),
         ("配置", "configuration"),
         ("设备管理", "device_management"),
         ("运行监控", "status_monitor"),
@@ -125,6 +127,7 @@ class MainWindow(QMainWindow):
         self._stacked = QStackedWidget()
         self._panels = {
             "workflow_editor": WorkflowPanel(self._config_manager, self._screen_capture),
+            "main_flow": MainFlowPanel(self._config_manager, self._screen_capture),
             "configuration": ConfigPanel(self._config_manager),
             "device_management": DevicePanel(self._device_manager, self._adb_core),
             "status_monitor": StatusPanel(),
@@ -132,6 +135,35 @@ class MainWindow(QMainWindow):
         }
         for _, key in self.NAV_ITEMS:
             self._stacked.addWidget(self._panels[key])
+
+        # 导航栏：切换 _stacked 面板
+        self._nav_buttons = {}
+        nav_bar = QWidget()
+        nav_bar.setFixedHeight(32)
+        nav_bar.setStyleSheet(
+            "QWidget { background-color: #161b22; border-bottom: 1px solid #30363d; }"
+            "QPushButton { background: transparent; border: none; color: #8b949e;"
+            "  padding: 0 14px; font-size: 12px; }"
+            "QPushButton:hover { color: #e6edf3; background-color: #21262d; }"
+            "QPushButton:checked { color: #e6edf3; border-bottom: 2px solid #f0883e; }"
+        )
+        nav_layout = QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(0)
+        for label, key in self.NAV_ITEMS:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(32)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, k=key: self._switch_panel(k))
+            nav_layout.addWidget(btn)
+            self._nav_buttons[key] = btn
+        nav_layout.addStretch()
+        outer.addWidget(nav_bar)
+        # 默认选中第一个
+        first_key = self.NAV_ITEMS[0][1]
+        if first_key in self._nav_buttons:
+            self._nav_buttons[first_key].setChecked(True)
 
         # Plan B: screenshot picker lives inside WorkflowPanel; keep an alias for compatibility
         self._screenshot_picker = self._panels["workflow_editor"]._screenshot_picker
@@ -315,6 +347,19 @@ class MainWindow(QMainWindow):
             self._toggle_log_panel()
         else:
             super().keyPressEvent(event)
+
+    def _switch_panel(self, panel_key: str):
+        """切换 _stacked 显示的面板，并更新导航栏选中状态。"""
+        panel = self._panels.get(panel_key)
+        if panel is None:
+            return
+        self._stacked.setCurrentWidget(panel)
+        for key, btn in self._nav_buttons.items():
+            btn.setChecked(key == panel_key)
+        self.nav_changed.emit(self._stacked.currentIndex())
+        # 主流程面板切换时刷新数据
+        if panel_key == "main_flow" and hasattr(panel, "load_main_flow"):
+            panel.load_main_flow()
 
     def _toggle_log_panel(self):
         sizes = self._main_splitter.sizes()

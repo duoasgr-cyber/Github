@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import time
 import threading
@@ -587,14 +587,22 @@ class StepExecutor(QObject):
 
     def _step_condition(self, step: dict) -> bool:
         check = step.get("check", {})
-        then_steps = step.get("then_steps", [])
-        else_steps = step.get("else_steps", [])
-
         condition_result = self._evaluate_condition(check)
         logger.info("Condition result: %s", condition_result)
 
-        steps_to_execute = then_steps if condition_result else else_steps
-        for sub_step in steps_to_execute:
+        branch = "then" if condition_result else "else"
+        mode = step.get("{}_mode".format(branch), "embedded")
+
+        if mode == "workflow":
+            wf_name = step.get("{}_workflow".format(branch), "")
+            if not wf_name:
+                logger.warning("Condition %s_workflow is empty, skipping", branch)
+                return True
+            logger.info("Condition %s: calling workflow %s", branch, wf_name)
+            return self.execute_workflow(wf_name)
+
+        steps = step.get("{}_steps".format(branch), [])
+        for sub_step in steps:
             if self._stop_requested:
                 return False
             success = self._execute_single_step(sub_step)
