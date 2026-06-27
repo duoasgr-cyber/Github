@@ -16,6 +16,7 @@ from core.config_manager import ConfigManager
 from ui.components.step_list_widget import StepListWidget
 from ui.components.step_editor import StepEditor
 from ui.components.screenshot_picker import ScreenshotPicker
+from ui.components.flow_chart.flow_chart_view import FlowChartView
 
 
 # 主流程允许的步骤类型：仅编排类（调用工作流/条件/循环/等待）
@@ -168,15 +169,47 @@ class MainFlowPanel(QWidget):
         self._step_editor = StepEditor(config_manager=self._config_manager, parent=self)
         left_layout.addWidget(self._step_editor, stretch=1)
 
-        # 右侧：投屏窗口（用于选点）
+        # 右侧：投屏窗口 + 流程图视图（可切换）
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(4)
 
+        # 视图切换工具栏
+        view_switcher = QHBoxLayout()
+        view_switcher.setSpacing(2)
+        self._btn_view_screen = QPushButton("投屏")
+        self._btn_view_screen.setCheckable(True)
+        self._btn_view_screen.setFixedHeight(24)
+        self._btn_view_screen.setChecked(True)
+        self._btn_view_screen.setCursor(Qt.PointingHandCursor)
+        self._btn_view_screen.clicked.connect(lambda: self._switch_right_view("screen"))
+        view_switcher.addWidget(self._btn_view_screen)
+
+        self._btn_view_chart = QPushButton("流程图")
+        self._btn_view_chart.setCheckable(True)
+        self._btn_view_chart.setFixedHeight(24)
+        self._btn_view_chart.setCursor(Qt.PointingHandCursor)
+        self._btn_view_chart.clicked.connect(lambda: self._switch_right_view("chart"))
+        view_switcher.addWidget(self._btn_view_chart)
+
+        view_switcher.addStretch()
+        view_switcher.setStyleSheet(
+            "QPushButton { background: #161b22; border: 1px solid #30363d;"
+            "  border-radius: 3px; color: #8b949e; padding: 0 10px; font-size: 11px; }"
+            "QPushButton:checked { background: #21262d; color: #e6edf3; "
+            "  border-color: #f0883e; }"
+        )
+        right_layout.addLayout(view_switcher)
+
         self._screenshot_picker = ScreenshotPicker(screen_capture=self._screen_capture, parent=self)
         self._screenshot_picker.setMinimumWidth(320)
         right_layout.addWidget(self._screenshot_picker)
+
+        self._flow_chart_view = FlowChartView(parent=self)
+        self._flow_chart_view.setMinimumWidth(320)
+        self._flow_chart_view.hide()
+        right_layout.addWidget(self._flow_chart_view)
 
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
@@ -191,12 +224,49 @@ class MainFlowPanel(QWidget):
         self._step_editor.step_changed.connect(self._on_step_changed)
         self._step_editor.coord_pick_requested.connect(self._on_coord_pick_requested)
         self._screenshot_picker.point_selected.connect(self._on_point_selected)
+        # 流程图选中节点 → 联动列表与编辑器
+        self._flow_chart_view.node_selected.connect(self._on_chart_node_selected)
+
+    def _switch_right_view(self, view: str):
+        """切换右侧视图：投屏 / 流程图。"""
+        if view == "screen":
+            self._screenshot_picker.show()
+            self._flow_chart_view.hide()
+            self._btn_view_screen.setChecked(True)
+            self._btn_view_chart.setChecked(False)
+        else:
+            self._screenshot_picker.hide()
+            self._flow_chart_view.show()
+            self._btn_view_screen.setChecked(False)
+            self._btn_view_chart.setChecked(True)
+            # 切到流程图时刷新数据
+            self._flow_chart_view.load_main_flow(self._main_flow)
+
+    def _on_chart_node_selected(self, node_id: str):
+        """流程图节点被选中 → 联动列表选中 + 编辑器加载。
+
+        仅对顶层节点联动（嵌套节点无对应列表项）。
+        """
+        top_index = self._flow_chart_view.get_top_step_index(node_id)
+        if top_index < 0:
+            return
+        # 避免循环：block 信号后选中列表行
+        self._step_list.blockSignals(True)
+        self._step_list.setCurrentRow(top_index)
+        self._step_list.blockSignals(False)
+        # 加载到编辑器
+        steps = self._main_flow.get("steps", [])
+        if top_index < len(steps):
+            self._step_editor.load_step(top_index, steps[top_index])
 
     def load_main_flow(self):
         self._main_flow = self._config_manager.get_main_flow()
         self._refresh_step_list()
         self._update_desc_button()
         self._step_editor.clear_step()
+        # 若流程图可见则刷新
+        if self._flow_chart_view.isVisible():
+            self._flow_chart_view.load_main_flow(self._main_flow)
 
     def _refresh_step_list(self):
         steps = self._main_flow.get("steps", [])
@@ -228,6 +298,10 @@ class MainFlowPanel(QWidget):
             return
         self._step_editor.load_step(index, steps[index])
         self._screenshot_picker.capture_and_display()
+        # 列表选中 → 流程图高亮（避免循环：直接调用 select_node_by_id）
+        if self._flow_chart_view.isVisible():
+            node_id = "step_{}".format(index)
+            self._flow_chart_view.select_node_by_id(node_id)
 
     def _on_step_order_changed(self):
         old_steps = self._main_flow.get("steps", [])
@@ -249,6 +323,12 @@ class MainFlowPanel(QWidget):
         self._main_flow["steps"] = steps
         self._refresh_step_list()
         self._step_list.setCurrentRow(index)
+        self._refresh_chart_if_visible()
+
+    def _refresh_chart_if_visible(self):
+        """若流程图可见则刷新（数据变更后保持同步）。"""
+        if self._flow_chart_view.isVisible():
+            self._flow_chart_view.load_main_flow(self._main_flow)
 
     def _on_point_selected(self, x: int, y: int):
         self._step_editor.update_coord_fields(x, y)
@@ -275,6 +355,7 @@ class MainFlowPanel(QWidget):
         self._refresh_step_list()
         new_index = len(steps) - 1
         self._step_list.setCurrentRow(new_index)
+        self._refresh_chart_if_visible()
 
     def _delete_step(self):
         row = self._step_list.currentRow()
@@ -293,6 +374,7 @@ class MainFlowPanel(QWidget):
         self._main_flow["steps"] = steps
         self._refresh_step_list()
         self._step_editor.clear_step()
+        self._refresh_chart_if_visible()
 
     def _copy_step(self):
         row = self._step_list.currentRow()
@@ -306,6 +388,7 @@ class MainFlowPanel(QWidget):
         self._main_flow["steps"] = steps
         self._refresh_step_list()
         self._step_list.setCurrentRow(row + 1)
+        self._refresh_chart_if_visible()
 
     def _move_up(self):
         row = self._step_list.currentRow()
@@ -318,6 +401,7 @@ class MainFlowPanel(QWidget):
         self._main_flow["steps"] = steps
         self._refresh_step_list()
         self._step_list.setCurrentRow(row - 1)
+        self._refresh_chart_if_visible()
 
     def _move_down(self):
         row = self._step_list.currentRow()
@@ -328,6 +412,7 @@ class MainFlowPanel(QWidget):
         self._main_flow["steps"] = steps
         self._refresh_step_list()
         self._step_list.setCurrentRow(row + 1)
+        self._refresh_chart_if_visible()
 
     def _save(self):
         self._config_manager.set_main_flow(self._main_flow)
