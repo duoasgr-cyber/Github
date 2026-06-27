@@ -39,12 +39,24 @@ class _WorkflowWorker(QObject):
         self._mail_count: int = 0
         self._cycle_count: int = 0
 
+    def _cfg_refresh_workflow(self) -> str:
+        return self._config_manager.get_config("workflow_engine.refresh_workflow", "refresh_path")
+
+    def _cfg_status_running(self) -> str:
+        return self._config_manager.get_config("workflow_engine.status_running", "运行中")
+
+    def _cfg_status_recovering(self) -> str:
+        return self._config_manager.get_config("workflow_engine.status_recovering", "恢复中...")
+
+    def _cfg_status_mail_full(self) -> str:
+        return self._config_manager.get_config("workflow_engine.status_mail_full", "邮件已满")
+
     def run(self) -> None:
         self._stop_requested = False
         self._paused = False
         self._pause_event.set()
         self._load_mail_count()
-        self.status_updated.emit("运行中", "#4caf50")
+        self.status_updated.emit(self._cfg_status_running(), "#4caf50")
 
         while not self._stop_requested:
             if not self._check_pause():
@@ -73,7 +85,7 @@ class _WorkflowWorker(QObject):
         self._paused = False
         self._step_executor.resume()
         self._pause_event.set()
-        self.status_updated.emit("运行中", "#4caf50")
+        self.status_updated.emit(self._cfg_status_running(), "#4caf50")
 
     def get_current_price(self) -> int:
         return self._current_price
@@ -127,10 +139,11 @@ class _WorkflowWorker(QObject):
         logger.info("邮件数量: %d", self._mail_count)
 
     def _check_mail_limit(self) -> bool:
-        max_mail_count = self._config_manager.get_config("buy_params.max_mail_count", 190)
+        default_max = self._config_manager.get_config("workflow_engine.max_mail_count_default", 190)
+        max_mail_count = self._config_manager.get_config("buy_params.max_mail_count", default_max)
         if self._mail_count >= max_mail_count:
             logger.warning("邮件数量已达上限: %d/%d，跳过购买", self._mail_count, max_mail_count)
-            self.status_updated.emit("邮件已满", "#ff6b6b")
+            self.status_updated.emit(self._cfg_status_mail_full(), "#ff6b6b")
             return False
         return True
 
@@ -159,7 +172,7 @@ class _WorkflowWorker(QObject):
         return f"programme_choose_{user_scheme}"
 
     def _refresh_price(self) -> None:
-        self._step_executor.execute_workflow("refresh_path")
+        self._step_executor.execute_workflow(self._cfg_refresh_workflow())
         if self._stop_requested:
             return
         self._step_executor.execute_workflow("programme_choose_0")
@@ -194,12 +207,12 @@ class _WorkflowWorker(QObject):
                 self.status_updated.emit("确认购买界面", "#4caf50")
                 self._handle_confirm_buy()
             else:
-                self.status_updated.emit("恢复中...", "#ff6b6b")
+                self.status_updated.emit(self._cfg_status_recovering(), "#ff6b6b")
                 self._recover_game()
         elif content_type == "number":
             self._handle_price_check()
         else:
-            self.status_updated.emit("恢复中...", "#ff6b6b")
+            self.status_updated.emit(self._cfg_status_recovering(), "#ff6b6b")
             self._recover_game()
 
     def _handle_confirm_buy(self) -> None:

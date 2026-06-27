@@ -43,7 +43,6 @@ class ScrcpyCapture(QObject):
         self._device_serial: Optional[str] = None
         self._server_jar_path: Optional[str] = None
         self._connected: bool = False
-        self._use_scrcpy: bool = False
         self._current_frame: Optional[np.ndarray] = None
         self._frame_lock = threading.Lock()
         self._cleanup_lock = threading.Lock()
@@ -70,31 +69,29 @@ class ScrcpyCapture(QObject):
         self._max_reconnect = max_retries
 
         for attempt in range(1, max_retries + 1):
-            logger.info("灏濊瘯鍚姩scrcpy杩炴帴 (%d/%d): %s", attempt, max_retries, device_serial)
+            logger.info("尝试启动scrcpy连接 (%d/%d): %s", attempt, max_retries, device_serial)
             try:
                 if self._start_scrcpy():
                     self._connected = True
-                    self._use_scrcpy = True
                     if self._reconnect_count > 0:
                         self.connection_restored.emit()
-                    logger.info("scrcpy杩炴帴鎴愬姛: %s", device_serial)
+                    logger.info("scrcpy连接成功: %s", device_serial)
                     return True
             except Exception as e:
-                logger.error("scrcpy杩炴帴澶辫触 (%d/%d): %s", attempt, max_retries, e)
-                self.error_occurred.emit(f"杩炴帴澶辫触 (灏濊瘯 {attempt}/{max_retries}): {e}")
+                logger.error("scrcpy连接失败 (%d/%d): %s", attempt, max_retries, e)
+                self.error_occurred.emit(f"连接失败 (尝试 {attempt}/{max_retries}): {e}")
                 self._cleanup_resources()
 
             if attempt < max_retries:
                 time.sleep(_RECONNECT_DELAY)
 
-        logger.warning("scrcpy杩炴帴澶辫触锛屽垏鎹㈠埌screencap鍥為€€妯″紡: %s", device_serial)
-        self._use_scrcpy = False
+        logger.warning("scrcpy连接失败，切换到screencap回退模式: %s", device_serial)
         self._connected = True
         self._start_fallback_reader()
         return True
 
     def stop(self):
-        logger.info("鍋滄灞忓箷鎹曡幏: %s", self._device_serial)
+        logger.info("停止屏幕捕获: %s", self._device_serial)
         self._stopping = True
         self._connected = False
         self._cleanup_resources()
@@ -118,7 +115,7 @@ class ScrcpyCapture(QObject):
             creationflags=_SUBPROCESS_FLAGS
         )
         if result.returncode != 0:
-            raise RuntimeError(f"鎺ㄩ€乻crcpy-server澶辫触: {result.stderr.decode(errors='replace')}")
+            raise RuntimeError(f"推送scrcpy-server失败: {result.stderr.decode(errors='replace')}")
 
         subprocess.run(
             ["adb", "-s", self._device_serial, "forward", "--remove", f"tcp:{self._forward_port}"],
@@ -135,7 +132,7 @@ class ScrcpyCapture(QObject):
             creationflags=_SUBPROCESS_FLAGS
         )
         if result.returncode != 0:
-            raise RuntimeError(f"adb forward澶辫触: {result.stderr.decode(errors='replace')}")
+            raise RuntimeError(f"adb forward失败: {result.stderr.decode(errors='replace')}")
 
         server_cmd = [
             "adb", "-s", self._device_serial, "shell",
@@ -155,7 +152,7 @@ class ScrcpyCapture(QObject):
 
         if self._server_process.poll() is not None:
             stderr_output = self._server_process.stderr.read().decode(errors="replace")
-            raise RuntimeError(f"scrcpy鏈嶅姟鍚姩澶辫触: {stderr_output}")
+            raise RuntimeError(f"scrcpy服务启动失败: {stderr_output}")
 
         connected = False
         for socket_attempt in range(_SOCKET_CONNECT_RETRIES):
@@ -168,24 +165,24 @@ class ScrcpyCapture(QObject):
                 break
             except (ConnectionRefusedError, OSError) as e:
                 if socket_attempt == _SOCKET_CONNECT_RETRIES - 1:
-                    raise RuntimeError(f"鏃犳硶杩炴帴鍒皊crcpy socket: {e}")
+                    raise RuntimeError(f"无法连接到scrcpy socket: {e}")
                 time.sleep(_SOCKET_CONNECT_INTERVAL)
 
         if not connected:
-            raise RuntimeError("鏃犳硶杩炴帴鍒皊crcpy socket")
+            raise RuntimeError("无法连接到scrcpy socket")
 
         name_len_byte = self._recv_exact(1)
         if not name_len_byte:
-            raise RuntimeError("鏃犳硶璇诲彇璁惧鍚嶇О闀垮害")
+            raise RuntimeError("无法读取设备名称长度")
         name_len = struct.unpack("B", name_len_byte)[0]
         if name_len > 0:
             device_name = self._recv_exact(name_len)
             if device_name:
-                logger.info("璁惧鍚嶇О: %s", device_name.decode(errors="replace"))
+                logger.info("设备名称: %s", device_name.decode(errors="replace"))
 
         codec_info = self._recv_exact(4)
         if not codec_info:
-            raise RuntimeError("鏃犳硶璇诲彇缂栫爜淇℃伅")
+            raise RuntimeError("无法读取编码信息")
 
         self._start_ffmpeg_and_threads()
         return True
@@ -215,7 +212,7 @@ class ScrcpyCapture(QObject):
                 creationflags=_SUBPROCESS_FLAGS
             )
         except FileNotFoundError:
-            raise RuntimeError("ffmpeg鏈壘鍒帮紝璇风‘淇漟fmpeg宸插畨瑁呭苟娣诲姞鍒癙ATH")
+            raise RuntimeError("ffmpeg未找到，请确认ffmpeg已安装并添加到PATH")
 
         self._writer_thread = threading.Thread(
             target=self._socket_to_ffmpeg, args=(gen,), daemon=True
@@ -246,7 +243,7 @@ class ScrcpyCapture(QObject):
         return data
 
     def _socket_to_ffmpeg(self, gen: int):
-        logger.debug("socket璇诲彇绾跨▼鍚姩 [gen=%d]", gen)
+        logger.debug("socket读取线程启动 [gen=%d]", gen)
         try:
             while not self._stopping and self._generation == gen:
                 pts_data = self._recv_exact(8)
@@ -262,7 +259,7 @@ class ScrcpyCapture(QObject):
                     continue
 
                 if packet_size > _MAX_PACKET_SIZE:
-                    logger.warning("寮傚父鍖呭ぇ灏? %d, 璺宠繃", packet_size)
+                    logger.warning("寮傚父鍖呭ぇ灏? %d, 跳过", packet_size)
                     continue
 
                 h264_data = self._recv_exact(packet_size)
@@ -277,9 +274,9 @@ class ScrcpyCapture(QObject):
                         break
         except Exception as e:
             if not self._stopping:
-                logger.error("socket璇诲彇绾跨▼寮傚父 [gen=%d]: %s", gen, e)
+                logger.error("socket读取线程异常 [gen=%d]: %s", gen, e)
         finally:
-            logger.debug("socket璇诲彇绾跨▼缁撴潫 [gen=%d]", gen)
+            logger.debug("socket读取线程结束 [gen=%d]", gen)
             if self._ffmpeg_process and self._ffmpeg_process.stdin:
                 try:
                     self._ffmpeg_process.stdin.close()
@@ -289,7 +286,7 @@ class ScrcpyCapture(QObject):
                 self._handle_connection_lost()
 
     def _decode_ffmpeg_output(self, gen: int):
-        logger.debug("甯цВ鐮佺嚎绋嬪惎鍔?[gen=%d]", gen)
+        logger.debug("帧解码线程启动[gen=%d]", gen)
         buf = b""
 
         try:
@@ -332,16 +329,16 @@ class ScrcpyCapture(QObject):
                             self.frame_captured.emit(frame.copy())
         except Exception as e:
             if not self._stopping:
-                logger.error("甯цВ鐮佺嚎绋嬪紓甯?[gen=%d]: %s", gen, e)
+                logger.error("帧解码线程异常[gen=%d]: %s", gen, e)
         finally:
-            logger.debug("甯цВ鐮佺嚎绋嬬粨鏉?[gen=%d]", gen)
+            logger.debug("帧解码线程结束[gen=%d]", gen)
 
     def _start_fallback_reader(self):
         self._fallback_thread = threading.Thread(target=self._fallback_loop, daemon=True)
         self._fallback_thread.start()
 
     def _fallback_loop(self):
-        logger.info("screencap鍥為€€妯″紡鍚姩")
+        logger.info("screencap回退模式启动")
         while not self._stopping:
             try:
                 frame = self._screencap_single()
@@ -354,13 +351,13 @@ class ScrcpyCapture(QObject):
                         self.frame_captured.emit(frame.copy())
                 time.sleep(_FALLBACK_INTERVAL)
             except Exception as e:
-                logger.error("screencap鍥為€€妯″紡鍑洪敊: %s", e)
+                logger.error("screencap回退模式出错: %s", e)
                 if not self._stopping:
                     self._connected = False
                     self.connection_lost.emit()
                     time.sleep(1)
                     self._connected = True
-        logger.info("screencap鍥為€€妯″紡缁撴潫")
+        logger.info("screencap回退模式结束")
 
     def _screencap_single(self) -> Optional[np.ndarray]:
         try:
@@ -379,7 +376,7 @@ class ScrcpyCapture(QObject):
             proc.communicate()
             return None
         except Exception as e:
-            logger.error("screencap澶辫触: %s", e)
+            logger.error("screencap失败: %s", e)
             return None
 
     def _handle_connection_lost(self):
@@ -398,7 +395,7 @@ class ScrcpyCapture(QObject):
             if self._stopping:
                 return
 
-            logger.info("鑷姩閲嶈繛 (%d/%d)", attempt, self._max_reconnect)
+            logger.info("自动重连 (%d/%d)", attempt, self._max_reconnect)
             time.sleep(_RECONNECT_DELAY)
 
             self._cleanup_resources()
@@ -406,17 +403,15 @@ class ScrcpyCapture(QObject):
             try:
                 if self._start_scrcpy():
                     self._connected = True
-                    self._use_scrcpy = True
                     self._reconnect_count = 0
                     self.connection_restored.emit()
-                    logger.info("鑷姩閲嶈繛鎴愬姛")
+                    logger.info("自动重连成功")
                     return
             except Exception as e:
-                logger.error("鑷姩閲嶈繛澶辫触 (%d/%d): %s", attempt, self._max_reconnect, e)
+                logger.error("自动重连失败 (%d/%d): %s", attempt, self._max_reconnect, e)
 
-        logger.warning("鑷姩閲嶈繛澶辫触锛屽垏鎹㈠埌screencap鍥為€€妯″紡")
-        self.error_occurred.emit("scrcpy杩炴帴涓㈠け锛屽凡鍒囨崲鍒皊creencap鍥為€€妯″紡")
-        self._use_scrcpy = False
+        logger.warning("自动重连失败，切换到screencap回退模式")
+        self.error_occurred.emit("scrcpy连接丢失，已切换到screencap回退模式")
         self._connected = True
         self._start_fallback_reader()
 

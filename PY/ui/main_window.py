@@ -25,7 +25,7 @@ from ui.panels.config_panel import ConfigPanel
 from ui.panels.device_panel import DevicePanel
 from ui.panels.status_panel import StatusPanel
 from ui.panels.test_panel import TestPanel
-from ui.components.step_liimport logging
+import logging
 import os
 import sys
 import traceback
@@ -52,7 +52,7 @@ from ui.panels.config_panel import ConfigPanel
 from ui.panels.device_panel import DevicePanel
 from ui.panels.status_panel import StatusPanel
 from ui.panels.test_panel import TestPanel
-from ui.components.step_liimport logging
+import logging
 import os
 import sys
 import traceback
@@ -106,11 +106,11 @@ class MainWindow(QMainWindow):
     nav_changed = pyqtSignal(int)
 
     NAV_ITEMS = [
-        ("宸ヤ綔娴佺紪杈?, "workflow_editor"),
-        ("閰嶇疆", "configuration"),
-        ("璁惧绠＄悊", "device_management"),
-        ("杩愯鐩戞帶", "status_monitor"),
-        ("娴嬭瘯", "test"),
+        ("工作流编辑", "workflow_editor"),
+        ("配置", "configuration"),
+        ("设备管理", "device_management"),
+        ("运行监控", "status_monitor"),
+        ("测试", "test"),
     ]
 
     def __init__(self, parent=None):
@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
         self._restore_tasks()
 
     def _init_ui(self):
-        self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+        self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
         self.setMinimumSize(1200, 800)
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -193,9 +193,9 @@ class MainWindow(QMainWindow):
 
         # empty state for screenshot area
         self._ss_empty = EmptyStateWidget(
-            icon="馃摲",
-            message="鏆傛棤鎴浘",
-            hint="閫夋嫨鍧愭爣姝ラ鍚庤嚜鍔ㄦ埅灞?
+            icon="📷",
+            message="暂无截图",
+            hint="选择坐标步骤后自动截屏"
         )
         self._ss_empty.setParent(self._screenshot_picker)
         self._ss_empty.hide()
@@ -303,12 +303,12 @@ class MainWindow(QMainWindow):
     def _on_settings(self):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox
         dlg = QDialog(self)
-        dlg.setWindowTitle("璁剧疆")
+        dlg.setWindowTitle("设置")
         dlg.setMinimumSize(800, 600)
         layout = QVBoxLayout(dlg)
         tabs = QTabWidget()
-        tabs.addTab(self._panels["configuration"], "閰嶇疆")
-        tabs.addTab(self._panels["device_management"], "璁惧绠＄悊")
+        tabs.addTab(self._panels["configuration"], "配置")
+        tabs.addTab(self._panels["device_management"], "设备管理")
         layout.addWidget(tabs)
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
         btn_box.accepted.connect(dlg.accept)
@@ -325,7 +325,7 @@ class MainWindow(QMainWindow):
             QApplication.beep()
             return
         from PyQt5.QtWidgets import QMessageBox
-        if QMessageBox.question(self, "鍏抽棴浠诲姟", f"纭畾鍏抽棴浠诲姟銆妠title}銆嬪悧锛?, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        if QMessageBox.question(self, "关闭任务", f"确定关闭任务【{title}】吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self._task_state.remove_task(task_id)
         self._task_bar.remove_task(index)
@@ -406,9 +406,9 @@ class MainWindow(QMainWindow):
                 self._ss_empty.hide()
             else:
                 self._ss_empty.set_state(
-                    icon="鉂?,
-                    message="褰撳墠姝ラ鏃犲潗鏍?,
-                    hint="閫夋嫨鐐瑰嚮/婊戝姩绫诲瀷姝ラ"
+                    icon="⚠",
+                    message="当前步骤无坐标",
+                    hint="选择点击/滑动类型步骤"
                 )
                 self._ss_empty.show()
         else:
@@ -485,9 +485,9 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
 
-        self._device_label = QLabel("璁惧: 鏈繛鎺?)
-        self._connection_label = QLabel("杩炴帴: 鏂紑")
-        self._ocr_label = QLabel("OCR: 鏈姞杞?)
+        self._device_label = QLabel("设备: 未连接")
+        self._connection_label = QLabel("连接: 断开")
+        self._ocr_label = QLabel("OCR: 未加载")
 
         for label in (self._device_label, self._connection_label, self._ocr_label):
             label.setFont(QFont("Microsoft YaHei", 10))
@@ -501,13 +501,13 @@ class MainWindow(QMainWindow):
     def _init_tray(self):
         self._tray_icon = QSystemTrayIcon(self)
         self._tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
-        self._tray_icon.setToolTip("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+        self._tray_icon.setToolTip("三角洲自动抢购工具 v2.0")
 
         tray_menu = QMenu()
 
-        show_action = QAction("鏄剧ず涓荤獥鍙?, self)
-        hide_action = QAction("闅愯棌涓荤獥鍙?, self)
-        quit_action = QAction("閫€鍑?, self)
+        show_action = QAction("显示主窗口", self)
+        hide_action = QAction("隐藏主窗口", self)
+        quit_action = QAction("退出", self)
 
         tray_menu.addAction(show_action)
         tray_menu.addAction(hide_action)
@@ -569,14 +569,14 @@ class MainWindow(QMainWindow):
 
         def exception_hook(exc_type, exc_value, exc_tb):
             tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            logging.critical("鏈鐞嗙殑寮傚父:\n%s", tb_text)
+            logging.critical("未处理的异常:\n%s", tb_text)
             try:
-                self._log_panel._append_log(f"鏈鐞嗙殑寮傚父: {exc_value}", logging.ERROR)
+                self._log_panel._append_log(f"未处理的异常: {exc_value}", logging.ERROR)
             except Exception:
                 pass
-            logging.critical("鏈鐞嗙殑寮傚父:\n%s", tb_text)
+            logging.critical("未处理的异常:\n%s", tb_text)
             try:
-                self._log_panel._append_log(f"鏈鐞嗙殑寮傚父: {exc_value}", logging.ERROR)
+                self._log_panel._append_log(f"未处理的异常: {exc_value}", logging.ERROR)
             except Exception:
                 pass
             original_excepthook(exc_type, exc_value, exc_tb)
@@ -610,11 +610,11 @@ class MainWindow(QMainWindow):
         bound_device = self._task_state.get_task(self._task_bar.current_task_id()).get("bound_device", "")
         if not bound_device:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "鏃犳硶鍚姩", "璇峰厛鍦ㄤ晶渚ц竟鏍忛€夋嫨璁惧鍚庡啀鍚姩銆?)
+            QMessageBox.warning(self, "无法启动", "请先在侧边栏选择设备后再启动。")
             return
         workflow_name = self._workflow_switcher.current_workflow()
         if not workflow_name:
-            logging.warning("鏈€夋嫨宸ヤ綔娴侊紝鏃犳硶鍚姩鐩戞帶")
+            logging.warning("未选择工作流，无法启动监控")
             return
         if self._workflow_worker is not None and self._workflow_worker.isRunning():
             logging.warning("瀹搞儰缍斿ù浣稿嚒閸︺劏绻嶇悰灞艰厬")
@@ -622,52 +622,52 @@ class MainWindow(QMainWindow):
         self._workflow_worker = _WorkflowWorker(self._step_executor, workflow_name, parent=self)
         self._workflow_worker.finished_signal.connect(self._on_workflow_worker_finished)
         self._workflow_worker.start()
-        self._panels["status_monitor"].update_status("杩愯涓?, "#00ff88")
+        self._panels["status_monitor"].update_status("运行中", "#00ff88")
         self._panels["status_monitor"].update_current_workflow(workflow_name)
-        self._floating_widget.update_status("杩愯涓?, "#00ff88")
+        self._floating_widget.update_status("运行中", "#00ff88")
         self._floating_widget.show()
-        logging.info("鍚姩鐩戞帶: %s", workflow_name)
+        logging.info("启动监控: %s", workflow_name)
 
     def _on_stop_monitoring(self):
         self._step_executor.stop()
-        self._panels["status_monitor"].update_status("鍋滄涓?.", "#ffaa00")
-        self._floating_widget.update_status("鍋滄涓?.", "#ffaa00")
+        self._panels["status_monitor"].update_status("停止中.", "#ffaa00")
+        self._floating_widget.update_status("停止中.", "#ffaa00")
 
     def _on_pause_monitoring(self):
         self._step_executor.pause()
-        self._panels["status_monitor"].update_status("宸叉殏鍋?, "#ffaa00")
-        self._floating_widget.update_status("宸叉殏鍋?, "#ffaa00")
+        self._panels["status_monitor"].update_status("已暂停", "#ffaa00")
+        self._floating_widget.update_status("已暂停", "#ffaa00")
 
     def _on_resume_monitoring(self):
         self._step_executor.resume()
-        self._panels["status_monitor"].update_status("杩愯涓?, "#00ff88")
-        self._floating_widget.update_status("杩愯涓?, "#00ff88")
+        self._panels["status_monitor"].update_status("运行中", "#00ff88")
+        self._floating_widget.update_status("运行中", "#00ff88")
 
     def _on_workflow_worker_finished(self):
-        self._panels["status_monitor"].update_status("宸插畬鎴?, "#a0a0a0")
-        self._floating_widget.update_status("宸插畬鎴?, "#a0a0a0")
+        self._panels["status_monitor"].update_status("已完成", "#a0a0a0")
+        self._floating_widget.update_status("已完成", "#a0a0a0")
 
     def set_device_status(self, serial: str):
         if serial:
-            self._device_label.setText(f"璁惧: {serial}")
+            self._device_label.setText(f"设备: {serial}")
         else:
-            self._device_label.setText("璁惧: 鏈繛鎺?)
+            self._device_label.setText("设备: 未连接")
 
 
     def set_connection_status(self, connected: bool):
-        self._connection_label.setText("杩炴帴: 宸茶繛鎺? if connected else "杩炴帴: 鏂紑")
+        self._connection_label.setText("连接: 已连接" if connected else "连接: 断开")
 
     def _on_step_started(self, index: int, step_type: str):
-        logging.info("姝ラ %d 寮€濮?%s", index + 1, step_type)
+        logging.info("步骤 %d 开始: %s", index + 1, step_type)
 
     def _on_workflow_completed(self, name: str):
-        logging.info("宸ヤ綔娴佸畬鎴?%s", name)
+        logging.info("工作流完成: %s", name)
 
     def _on_workflow_failed(self, name: str, error: str):
-        logging.error("宸ヤ綔娴佸け璐?%s - %s", name, error)
+        logging.error("工作流失败: %s - %s", name, error)
 
     def _on_workflow_stopped(self):
-        logging.info("宸ヤ綔娴佸凡鍋滄")
+        logging.info("工作流已停止")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

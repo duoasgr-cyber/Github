@@ -31,7 +31,7 @@ elif not icon_path.endswith('.ico'):
     icon_path = ico_path if os.path.exists(ico_path) else None
 
 a = Analysis(
-    ['app.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=datas,

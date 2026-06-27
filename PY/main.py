@@ -16,7 +16,8 @@ def main():
     config_manager = ConfigManager(base_dir)
     log_file = config_manager.get_config("logging.log_file") or "app.log"
     log_level = config_manager.get_config("logging.log_level", "INFO")
-    setup_logging(log_file=log_file, level=log_level)
+    max_log_size_mb = config_manager.get_config("logging.max_log_size_mb", 1.0)
+    setup_logging(log_file=log_file, level=log_level, max_log_size_mb=max_log_size_mb)
 
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)

@@ -36,7 +36,6 @@ class ConfigPanel(QWidget):
 
         layout.addWidget(self._create_buy_params_group())
         layout.addWidget(self._create_mail_params_group())
-        layout.addWidget(self._create_schedule_group())
         layout.addWidget(self._create_recognition_group())
         layout.addWidget(self._create_ocr_regions_group())
         layout.addWidget(self._create_wifi_control_group())
@@ -92,22 +91,6 @@ class ConfigPanel(QWidget):
         auto_increment = QCheckBox("自动递增")
         self._widgets["mail_params.auto_increment"] = auto_increment
         form.addRow("", auto_increment)
-
-        group.setLayout(form)
-        return group
-
-    def _create_schedule_group(self):
-        group = QGroupBox("定时启动")
-        form = QFormLayout()
-
-        enabled = QCheckBox("启用定时")
-        self._widgets["schedule.enabled"] = enabled
-        form.addRow("", enabled)
-
-        start_time = QTimeEdit()
-        start_time.setDisplayFormat("HH:mm")
-        self._widgets["schedule.start_time"] = start_time
-        form.addRow("启动时间:", start_time)
 
         group.setLayout(form)
         return group
