@@ -1,14 +1,18 @@
-"""ScrcpyCapture 单元测试：坐标转换、控制委托、降级逻辑。
+"""ScrcpyCapture 单元测试：坐标转换、控制委托、降级逻辑、版本检测。
 
 验证视频流坐标 ↔ 设备物理坐标的转换，
-以及 control 模式与 adb 降级模式下的 begin/end_touch 行为。
+control 模式与 adb 降级模式下的 begin/end_touch 行为，
+以及 scrcpy server 版本号自动检测。
 """
+import os
+import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 import numpy as np
 
-from core.screen_capture import ScrcpyCapture
+from core.screen_capture import ScrcpyCapture, _SCRCPY_FALLBACK_VERSION
 from core.scrcpy_control import ACTION_DOWN, ACTION_MOVE, ACTION_UP
 
 
@@ -187,6 +191,68 @@ class TestGetVideoSize(unittest.TestCase):
     def test_returns_zero_initially(self):
         cap = ScrcpyCapture()
         self.assertEqual(cap.get_video_size(), (0, 0))
+
+
+class TestDetectServerVersion(unittest.TestCase):
+    """_detect_server_version 从 jar 自动提取 scrcpy server 版本号。"""
+
+    # 仓库内自带的真实 jar（3.3.4）
+    _REAL_JAR = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "lib", "scrcpy-server.jar",
+    )
+
+    def test_detects_real_jar_version(self):
+        """对仓库内真实 jar 应检测到 3.3.4。"""
+        if not os.path.exists(self._REAL_JAR):
+            self.skipTest("lib/scrcpy-server.jar 不存在")
+        version = ScrcpyCapture._detect_server_version(self._REAL_JAR)
+        self.assertEqual(version, "3.3.4")
+
+    def test_detects_synthetic_jar_version(self):
+        """构造含 2.7.1 版本号的假 dex，应正确提取。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            jar_path = os.path.join(tmp, "fake-server.jar")
+            # 构造一个最小 dex：前面放一些噪音，中间放版本号字符串
+            fake_dex = b"\x00" * 32 + b"some-prefix\x002.7.1\x00other-stuff"
+            with zipfile.ZipFile(jar_path, "w") as zf:
+                zf.writestr("classes.dex", fake_dex)
+            version = ScrcpyCapture._detect_server_version(jar_path)
+            self.assertEqual(version, "2.7.1")
+
+    def test_fallback_when_no_dex(self):
+        """jar 中没有 dex 文件时回退到 _SCRCPY_FALLBACK_VERSION。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            jar_path = os.path.join(tmp, "no-dex.jar")
+            with zipfile.ZipFile(jar_path, "w") as zf:
+                zf.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0")
+            version = ScrcpyCapture._detect_server_version(jar_path)
+            self.assertEqual(version, _SCRCPY_FALLBACK_VERSION)
+
+    def test_fallback_when_no_version_in_dex(self):
+        """dex 中没有版本号字符串时回退。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            jar_path = os.path.join(tmp, "no-version.jar")
+            with zipfile.ZipFile(jar_path, "w") as zf:
+                zf.writestr("classes.dex", b"\x00" * 64)
+            version = ScrcpyCapture._detect_server_version(jar_path)
+            self.assertEqual(version, _SCRCPY_FALLBACK_VERSION)
+
+    def test_fallback_when_file_not_found(self):
+        """jar 路径不存在时回退（不抛异常）。"""
+        version = ScrcpyCapture._detect_server_version("/nonexistent/path.jar")
+        self.assertEqual(version, _SCRCPY_FALLBACK_VERSION)
+
+    def test_picks_first_version_before_gradle(self):
+        """dex 中 scrcpy 版本号在 gradle 版本之前时，取 scrcpy 版本。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            jar_path = os.path.join(tmp, "mixed.jar")
+            # 3.3.4 在前，8.13.0 在后，应取 3.3.4
+            fake_dex = b"\x00" * 16 + b"3.3.4\x00" + b"\x00" * 8 + b"8.13.0\x00"
+            with zipfile.ZipFile(jar_path, "w") as zf:
+                zf.writestr("classes.dex", fake_dex)
+            version = ScrcpyCapture._detect_server_version(jar_path)
+            self.assertEqual(version, "3.3.4")
 
 
 if __name__ == "__main__":

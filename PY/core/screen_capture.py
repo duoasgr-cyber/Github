@@ -7,6 +7,7 @@ import re
 import time
 import os
 import sys
+import zipfile
 from typing import Optional, Tuple
 
 import numpy as np
@@ -48,6 +49,12 @@ _RESOLUTION_RE = re.compile(rb"(\d{2,5})x(\d{2,5})")
 
 # 触摸 tap 判定阈值（视频流坐标系像素，press≈release 视为 tap）
 _TOUCH_TAP_THRESHOLD = 10
+
+# 已知 scrcpy server 版本（从 jar 自动检测失败时的回退值）
+# 当前仓库 lib/scrcpy-server.jar 实测为 3.3.4
+_SCRCPY_FALLBACK_VERSION = "3.3.4"
+# 版本号正则：匹配 X.Y.Z 格式（如 3.3.4、2.7.1）
+_VERSION_RE = re.compile(rb"(\d{1,2}\.\d{1,2}\.\d{1,3})")
 
 
 class ScrcpyCapture(QObject):
@@ -266,6 +273,43 @@ class ScrcpyCapture(QObject):
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
 
+    @staticmethod
+    def _detect_server_version(jar_path: str) -> str:
+        """从 scrcpy-server.jar 的 classes.dex 中提取 VERSION_NAME。
+
+        scrcpy server 启动时会校验客户端传入的版本号，不匹配则拒绝启动。
+        硬编码版本号在升级 jar 后会失效，因此运行时从 jar 自动检测。
+
+        检测逻辑：扫描 classes.dex 中的 ASCII 字符串，匹配 X.Y.Z 格式，
+        取第一个出现的版本号（BuildConfig.VERSION_NAME 通常排在最前面）。
+        失败时回退到 _SCRCPY_FALLBACK_VERSION。
+        """
+        try:
+            with zipfile.ZipFile(jar_path) as zf:
+                # 优先读 classes.dex（主 dex）
+                dex_name = "classes.dex"
+                if dex_name not in zf.namelist():
+                    # 找第一个 classes*.dex
+                    dex_files = [n for n in zf.namelist() if n.startswith("classes") and n.endswith(".dex")]
+                    if not dex_files:
+                        logger.warning("jar 中未找到 dex 文件，使用回退版本: %s", _SCRCPY_FALLBACK_VERSION)
+                        return _SCRCPY_FALLBACK_VERSION
+                    dex_name = dex_files[0]
+                dex_data = zf.read(dex_name)
+
+            matches = _VERSION_RE.findall(dex_data)
+            if not matches:
+                logger.warning("dex 中未检测到版本号，使用回退版本: %s", _SCRCPY_FALLBACK_VERSION)
+                return _SCRCPY_FALLBACK_VERSION
+
+            # 取第一个匹配（scrcpy VERSION_NAME 在 dex 中排在 gradle 版本之前）
+            version = matches[0].decode("ascii")
+            logger.info("检测到 scrcpy server 版本: %s (from %s)", version, jar_path)
+            return version
+        except Exception as e:
+            logger.warning("检测 scrcpy server 版本失败，使用回退版本 %s: %s", _SCRCPY_FALLBACK_VERSION, e)
+            return _SCRCPY_FALLBACK_VERSION
+
     def _start_scrcpy(self) -> bool:
         push_cmd = [
             "adb", "-s", self._device_serial, "push",
@@ -295,11 +339,14 @@ class ScrcpyCapture(QObject):
         if result.returncode != 0:
             raise RuntimeError(f"adb forward澶辫触: {result.stderr.decode(errors='replace')}")
 
+        # 运行时从 jar 检测版本号，避免升级 jar 后版本不匹配导致 server 拒绝启动
+        server_version = self._detect_server_version(self._server_jar_path)
+
         server_cmd = [
             "adb", "-s", self._device_serial, "shell",
             "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
             "app_process", "/", "com.genymobile.scrcpy.Server",
-            "2.0", "log_level=info",
+            server_version, "log_level=info",
             f"bit_rate={_SCRCPY_BIT_RATE}", f"max_size={_SCRCPY_MAX_SIZE}",
             f"i_frame_interval={_SCRCPY_I_FRAME_INTERVAL}",
             "tunnel_forward=true", "control=true", "cleanup=true", "audio=false"
