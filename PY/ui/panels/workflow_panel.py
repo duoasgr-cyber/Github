@@ -442,6 +442,7 @@ class WorkflowPanel(QWidget):
         workflow = self._config_manager.get_workflow(self._current_workflow_name)
         if not workflow:
             return
+        self._push_undo()
         # _move_step 已经交换了 _raw_steps，直接使用即可
         workflow["steps"] = list(self._step_list._raw_steps)
         self._config_manager.set_workflow(self._current_workflow_name, workflow)
@@ -521,15 +522,31 @@ class WorkflowPanel(QWidget):
 
     def on_workflow_selected(self, index: int):
         if index < 0:
+            self._clear_undo_redo()
             self._current_workflow_name = ""
             self._step_list.clear()
             self._step_editor.clear_step()
             return
+        self._clear_undo_redo()
         name = self._workflow_combo.itemText(index)
         self._current_workflow_name = name
         self.refresh_step_list()
         self._step_editor.clear_step()
         self.workflow_selected.emit(name)
+
+    def _clear_undo_redo(self):
+        """清空撤销/重做栈。用于工作流切换、保存、执行场景。"""
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._update_undo_redo_buttons()
+
+    def _snapshot_steps(self, steps):
+        """深拷贝步骤并剥离 preview 字段，防 base64 图撑爆内存。"""
+        snapshot = []
+        for s in steps:
+            light = {k: v for k, v in s.items() if k != "preview"}
+            snapshot.append(copy.deepcopy(light))
+        return snapshot
 
     def _push_undo(self):
         """保存当前状态到撤销栈。"""
@@ -537,7 +554,7 @@ class WorkflowPanel(QWidget):
             return
         workflow = self._config_manager.get_workflow(self._current_workflow_name)
         if workflow:
-            self._undo_stack.append(copy.deepcopy(workflow.get("steps", [])))
+            self._undo_stack.append(self._snapshot_steps(workflow.get("steps", [])))
             if len(self._undo_stack) > self._max_history:
                 self._undo_stack.pop(0)
             self._redo_stack.clear()
@@ -550,7 +567,7 @@ class WorkflowPanel(QWidget):
         if not workflow:
             return
         # 当前状态存入 redo
-        self._redo_stack.append(copy.deepcopy(workflow.get("steps", [])))
+        self._redo_stack.append(self._snapshot_steps(workflow.get("steps", [])))
         # 恢复
         old_steps = self._undo_stack.pop()
         workflow["steps"] = old_steps
@@ -564,7 +581,7 @@ class WorkflowPanel(QWidget):
         workflow = self._config_manager.get_workflow(self._current_workflow_name)
         if not workflow:
             return
-        self._undo_stack.append(copy.deepcopy(workflow.get("steps", [])))
+        self._undo_stack.append(self._snapshot_steps(workflow.get("steps", [])))
         new_steps = self._redo_stack.pop()
         workflow["steps"] = new_steps
         self._config_manager.set_workflow(self._current_workflow_name, workflow)
@@ -574,6 +591,22 @@ class WorkflowPanel(QWidget):
     def _update_undo_redo_buttons(self):
         self._btn_undo.setEnabled(len(self._undo_stack) > 0)
         self._btn_redo.setEnabled(len(self._redo_stack) > 0)
+
+    def toggle_step_enabled(self, index: int):
+        """切换步骤启用/禁用状态（可撤销）。"""
+        if not self._current_workflow_name:
+            return
+        workflow = self._config_manager.get_workflow(self._current_workflow_name)
+        if not workflow:
+            return
+        steps = workflow.get("steps", [])
+        if index >= len(steps):
+            return
+        self._push_undo()
+        steps[index]["enabled"] = not steps[index].get("enabled", True)
+        workflow["steps"] = steps
+        self._config_manager.set_workflow(self._current_workflow_name, workflow)
+        self.refresh_step_list()
 
     def add_step(self):
         if not self._current_workflow_name:

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import json
 import os
 import sys
@@ -20,6 +20,7 @@ from core.device_manager import DeviceManager
 from core.screen_capture import ScrcpyCapture
 from core.ocr_engine import OcrEngine
 from core.step_executor import StepExecutor
+from core.script_runner import ScriptRunner
 from core.logger import setup_logging
 from ui.panels.log_panel import LogPanel, QtLogHandler
 from ui.panels.workflow_panel import WorkflowPanel
@@ -83,6 +84,7 @@ class MainWindow(QMainWindow):
             self._screen_capture, self._ocr_engine,
             self._device_manager, parent=self
         )
+        self._script_runner = ScriptRunner(self._step_executor, parent=self)
         self._task_state = TaskStateManager(base_dir)
         self._floating_widget = FloatingWidget()
         self._floating_widget.hide()
@@ -271,6 +273,14 @@ class MainWindow(QMainWindow):
         btn_box.accepted.connect(dlg.accept)
         layout.addWidget(btn_box)
         dlg.exec_()
+        # 把面板从 QTabWidget 取出并重新挂回 stacked，避免随对话框一起被销毁
+        # （addTab 会把 widget 重新 parent 到 QTabWidget，对话框关闭时会被一并销毁）
+        tabs.removeTab(tabs.indexOf(self._panels["configuration"]))
+        tabs.removeTab(tabs.indexOf(self._panels["device_management"]))
+        if self._stacked.indexOf(self._panels["configuration"]) < 0:
+            self._stacked.insertWidget(1, self._panels["configuration"])
+        if self._stacked.indexOf(self._panels["device_management"]) < 0:
+            self._stacked.insertWidget(2, self._panels["device_management"])
 
     def _on_switch_task(self, index: int):
         self._apply_active_task()
@@ -290,7 +300,8 @@ class MainWindow(QMainWindow):
         self._save_task_snapshot()
 
     def _on_manage_workflows(self):
-        dialog = WorkflowManagerDialog(self._config_manager, self)
+        current_wf = self._workflow_switcher.current_workflow()
+        dialog = WorkflowManagerDialog(self._config_manager, current_wf, self)
         dialog.exec_()
         self._workflow_switcher.refresh()
         self._panels["workflow_editor"].load_workflows()
@@ -410,19 +421,7 @@ class MainWindow(QMainWindow):
             wf.delete_step()
 
     def _on_step_toggle_enabled(self, index: int):
-        wf = self._panels["workflow_editor"]
-        if not hasattr(wf, "_current_workflow_name") or not wf._current_workflow_name:
-            return
-        workflow = self._config_manager.get_workflow(wf._current_workflow_name)
-        if not workflow:
-            return
-        steps = workflow.get("steps", [])
-        if index >= len(steps):
-            return
-        steps[index]["enabled"] = not steps[index].get("enabled", True)
-        workflow["steps"] = steps
-        self._config_manager.set_workflow(wf._current_workflow_name, workflow)
-        wf.refresh_step_list()
+        self._panels["workflow_editor"].toggle_step_enabled(index)
         self._refresh_preview()
 
 
@@ -578,6 +577,7 @@ class MainWindow(QMainWindow):
             self._config_manager.save_config()
             self._save_task_snapshot()
             self._save_ui_state()
+            self._panels["workflow_editor"]._clear_undo_redo()
             self._toast.success("所有配置已保存")
         except Exception as e:
             self._toast.error(f"保存失败: {e}")
@@ -800,6 +800,48 @@ class MainWindow(QMainWindow):
         self._step_executor.workflow_failed.connect(self._on_workflow_failed)
         self._step_executor.workflow_stopped.connect(self._on_workflow_stopped)
 
+        # LogPanel 脚本控制按钮
+        self._log_panel.request_run_from.connect(self._on_log_run_from)
+        self._log_panel.request_run_full.connect(self._on_log_run_full)
+        self._log_panel.request_stop.connect(self._on_log_stop)
+        self._script_runner.run_started.connect(self._on_script_run_started)
+        self._script_runner.run_finished.connect(self._on_script_run_finished)
+        self._script_runner.workflow_failed.connect(
+            lambda name, err: logging.error("\u811a\u672c\u5931\u8d25 %s - %s", name, err)
+        )
+        self._script_runner.workflow_stopped.connect(
+            lambda: logging.info("\u811a\u672c\u5df2\u505c\u6b62")
+        )
+
+    def _on_log_run_from(self):
+        wf = self._workflow_switcher.current_workflow()
+        if not wf:
+            self._toast.warning("\u672a\u9009\u62e9\u5de5\u4f5c\u6d41")
+            return
+        idx = self._panels["workflow_editor"].get_current_step_index()
+        if idx < 0:
+            idx = 0
+            logging.info("\u672a\u9009\u4e2d\u6b65\u9aa4\uff0c\u4ece\u7b2c 1 \u6b65\u542f\u52a8")
+        self._script_runner.run_from(wf, idx)
+
+    def _on_log_run_full(self):
+        wf = self._workflow_switcher.current_workflow()
+        if not wf:
+            self._toast.warning("\u672a\u9009\u62e9\u5de5\u4f5c\u6d41")
+            return
+        self._script_runner.run_full(wf)
+
+    def _on_log_stop(self):
+        self._script_runner.stop()
+
+    def _on_script_run_started(self, name: str, idx: int):
+        self._log_panel.set_running(True)
+        logging.info("\u811a\u672c\u542f\u52a8 workflow=%s, start_index=%d", name, idx)
+
+    def _on_script_run_finished(self):
+        self._log_panel.set_running(False)
+        logging.info("\u811a\u672c\u6267\u884c\u7ed3\u675f")
+
     def _on_external_workflow_saved(self, workflow_name: str):
         self._workflow_switcher.refresh()
         self._refresh_preview()
@@ -856,6 +898,7 @@ class MainWindow(QMainWindow):
         if self._workflow_worker is not None and self._workflow_worker.isRunning():
             self._toast.warning("工作流已在运行中")
             return
+        self._panels["workflow_editor"]._clear_undo_redo()
         self._workflow_worker = _WorkflowWorker(self._step_executor, workflow_name, parent=self)
         self._workflow_worker.finished_signal.connect(self._on_workflow_worker_finished)
         self._workflow_worker.start()

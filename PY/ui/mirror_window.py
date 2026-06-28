@@ -219,18 +219,36 @@ class MirrorGraphicsView(QGraphicsView):
         if pw == 0 or ph == 0:
             return (0, 0)
 
+        # === 方向一致性校正 ===
+        # 帧方向反映设备当前实际方向（scrcpy 自动跟随旋转）。
+        # 若 _device_width/_device_height 与帧方向不一致（旋转检测 / wm size 延迟导致），
+        # 计算时本地交换，避免坐标轴颠倒（X/Y 互换）。
+        dw, dh = self._device_width, self._device_height
+        if dw > 0 and dh > 0 and (pw > ph) != (dw > dh):
+            dw, dh = dh, dw
+            # 仅在状态变化时告警一次，避免鼠标移动刷屏
+            if not getattr(self, '_orientation_mismatch_warned', False):
+                self._orientation_mismatch_warned = True
+                logger.warning(
+                    "⚠️ 帧与设备方向不一致，已自动校正映射: "
+                    "frame=%dx%d, device=%dx%d -> 按 %dx%d 映射",
+                    pw, ph, self._device_width, self._device_height, dw, dh
+                )
+        elif dw > 0 and dh > 0:
+            self._orientation_mismatch_warned = False
+
         # === 坐标一致性验证 ===
         # 检查帧与设备的缩放比例是否一致（允许 ±10% 误差）
-        if self._device_width > 0 and self._device_height > 0 and pw > 0 and ph > 0:
-            scale_x = self._device_width / pw
-            scale_y = self._device_height / ph
+        if dw > 0 and dh > 0 and pw > 0 and ph > 0:
+            scale_x = dw / pw
+            scale_y = dh / ph
             # 如果两个轴的缩放比例差异超过 10%，说明可能有问题
             if abs(scale_x - scale_y) / max(scale_x, scale_y) > 0.1:
                 logger.warning(
                     "⚠️ 坐标映射比例异常: X=%.2f, Y=%.2f (frame=%dx%d, device=%dx%d) "
                     "%s",
                     scale_x, scale_y, pw, ph,
-                    self._device_width, self._device_height,
+                    dw, dh,
                     "(使用帧尺寸回退)" if getattr(self, '_resolution_from_frame', False) else ""
                 )
 
@@ -241,10 +259,10 @@ class MirrorGraphicsView(QGraphicsView):
                 px, py, pw, ph
             )
 
-        dev_x = int(px * self._device_width / pw)
-        dev_y = int(py * self._device_height / ph)
-        dev_x = max(0, min(dev_x, self._device_width - 1))
-        dev_y = max(0, min(dev_y, self._device_height - 1))
+        dev_x = int(px * dw / pw)
+        dev_y = int(py * dh / ph)
+        dev_x = max(0, min(dev_x, dw - 1))
+        dev_y = max(0, min(dev_y, dh - 1))
 
         # 调试日志（限制输出频率）
         if not hasattr(self, '_click_count'):
@@ -256,9 +274,9 @@ class MirrorGraphicsView(QGraphicsView):
                 "[frame=%dx%d, device=%dx%d, scale=%.2fx%.2f, fallback=%s]",
                 self._click_count,
                 view_x, view_y, px, py, dev_x, dev_y,
-                pw, ph, self._device_width, self._device_height,
-                self._device_width / pw if pw > 0 else 0,
-                self._device_height / ph if ph > 0 else 0,
+                pw, ph, dw, dh,
+                dw / pw if pw > 0 else 0,
+                dh / ph if ph > 0 else 0,
                 getattr(self, '_resolution_from_frame', False)
             )
 
