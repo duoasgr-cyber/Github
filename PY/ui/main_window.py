@@ -11,8 +11,34 @@ from PyQt5.QtWidgets import (
     QMenu, QAction, QSizePolicy, QApplication, QSplitter,
     QDialog, QTextEdit
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QIcon, QFont, QKeySequence, QColor, QPalette
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
+from PyQt5.QtGui import QIcon, QFont
+
+from core.config_manager import ConfigManager
+from core.adb_core import AdbCore, _adb
+from core.device_manager import DeviceManager
+from core.screen_capture import ScrcpyCapture
+from core.ocr_engine import OcrEngine
+from core.step_executor import StepExecutor
+from core.logger import setup_logging
+from ui.panels.log_panel import LogPanel, QtLogHandler
+from ui.panels.workflow_panel import WorkflowPanel
+from ui.panels.config_panel import ConfigPanel
+from ui.panels.device_panel import DevicePanel
+from ui.panels.status_panel import StatusPanel
+from ui.panels.test_panel import TestPanel
+import os
+import sys
+import traceback
+
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QListWidget, QListWidgetItem, QStackedWidget,
+    QStatusBar, QLabel, QSystemTrayIcon,
+    QMenu, QAction, QSizePolicy, QApplication, QSplitter
+)
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
+from PyQt5.QtGui import QIcon, QFont
 
 from core.config_manager import ConfigManager
 from core.adb_core import AdbCore, _adb
@@ -77,7 +103,7 @@ class MainWindow(QMainWindow):
         self._screen_capture = ScrcpyCapture(parent=self)
         self._screen_capture.connection_lost.connect(lambda: self.set_connection_status(False))
         self._screen_capture.connection_restored.connect(lambda: self.set_connection_status(True))
-        self._screen_capture.error_occurred.connect(lambda msg: logging.error("屏幕采集错误: %s", msg))
+        self._screen_capture.error_occurred.connect(lambda msg: logging.error("投屏错误: %s", msg))
         self._ocr_engine = OcrEngine()
         self._step_executor = StepExecutor(
             self._config_manager, self._adb_core,
@@ -138,7 +164,7 @@ class MainWindow(QMainWindow):
 
         self._stacked = QStackedWidget()
         self._panels = {
-            "workflow_editor": WorkflowPanel(self._config_manager, self._screen_capture, self._step_executor),
+            "workflow_editor": WorkflowPanel(self._config_manager, self._screen_capture, device_manager=self._device_manager),
             "configuration": ConfigPanel(self._config_manager),
             "device_management": DevicePanel(self._device_manager, self._adb_core),
             "status_monitor": StatusPanel(),
@@ -149,7 +175,15 @@ class MainWindow(QMainWindow):
 
         self._screenshot_picker = ScreenshotPicker(
             screen_capture=self._screen_capture,
-            adb_core=self._adb_core,
+            device_manager=self._device_manager,
+            config_manager=self._config_manager,
+        )
+
+        # empty state for screenshot area
+        self._ss_empty = EmptyStateWidget(
+            icon="📷",
+            message="暂无截图",
+            hint="选择坐标步骤后自动截图"
         )
         self._screenshot_picker.setMinimumWidth(400)
 
@@ -291,7 +325,7 @@ class MainWindow(QMainWindow):
             QApplication.beep()
             return
         from PyQt5.QtWidgets import QMessageBox
-        if QMessageBox.question(self, "关闭任务", f"确定关闭任务「{title}」吗", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        if QMessageBox.question(self, "关闭任务", f"确定关闭任务《{title}》吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self._task_state.remove_task(task_id)
         self._task_bar.remove_task(index)
@@ -422,6 +456,33 @@ class MainWindow(QMainWindow):
         self._panels["workflow_editor"].toggle_step_enabled(index)
         self._refresh_preview()
 
+    def _update_screenshot_empty_state(self):
+        wf = self._panels["workflow_editor"]
+        if not hasattr(wf, "_step_list"):
+            return
+        row = wf._step_list.currentRow()
+        if row < 0:
+            self._ss_empty.show()
+            return
+        steps = []
+        if hasattr(wf, "_current_workflow_name") and wf._current_workflow_name:
+            data = self._config_manager.get_workflow(wf._current_workflow_name)
+            if data:
+                steps = data.get("steps", [])
+        if row < len(steps):
+            step = steps[row]
+            coord_types = {"tap", "long_press", "swipe", "tap_point"}
+            if step.get("type", "") in coord_types:
+                self._ss_empty.hide()
+            else:
+                self._ss_empty.set_state(
+                    icon="⚠",
+                    message="当前步骤无坐标",
+                    hint="选择点击/滑动类型步骤"
+                )
+                self._ss_empty.show()
+        else:
+            self._ss_empty.show()
 
     def _on_screenshot_point_selected(self, x: int, y: int):
         wf_panel = self._panels["workflow_editor"]
@@ -731,7 +792,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
 
         self._device_label = QLabel("设备: 未连接")
-        self._connection_label = QLabel("连接: \u65ad\u5f00")
+        self._connection_label = QLabel("连接: 断开")
         self._ocr_label = QLabel("OCR: 未加载")
 
         for label in (self._device_label, self._connection_label, self._ocr_label):
@@ -866,9 +927,13 @@ class MainWindow(QMainWindow):
             logging.critical("未处理的异常:\n%s", tb_text)
             try:
                 self._log_panel._append_log(f"未处理的异常: {exc_value}", logging.ERROR)
-            except Exception as e:
-                import sys as _sys
-                print(f"[fallback] 异常日志写入失败: {e}", file=_sys.stderr)
+            except Exception:
+                pass
+            logging.critical("未处理的异常:\n%s", tb_text)
+            try:
+                self._log_panel._append_log(f"未处理的异常: {exc_value}", logging.ERROR)
+            except Exception:
+                pass
             original_excepthook(exc_type, exc_value, exc_tb)
 
         sys.excepthook = exception_hook
@@ -899,14 +964,15 @@ class MainWindow(QMainWindow):
     def _on_start_monitoring(self):
         bound_device = self._task_state.get_task(self._task_bar.current_task_id()).get("bound_device", "")
         if not bound_device:
-            self._toast.warning("请先在侧边栏选择设备后再启动")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "无法启动", "请先在侧边栏选择设备后再启动。")
             return
         workflow_name = self._workflow_switcher.current_workflow()
         if not workflow_name:
-            self._toast.warning("未选择工作流，无法启动监控")
+            logging.warning("未选择工作流，无法启动监控")
             return
         if self._workflow_worker is not None and self._workflow_worker.isRunning():
-            self._toast.warning("工作流已在运行中")
+            logging.warning("工作流正在运行中")
             return
         self._panels["workflow_editor"]._clear_undo_redo()
         self._workflow_worker = _WorkflowWorker(self._step_executor, workflow_name, parent=self)
@@ -916,18 +982,17 @@ class MainWindow(QMainWindow):
         self._panels["status_monitor"].update_current_workflow(workflow_name)
         self._floating_widget.update_status("运行中", "#00ff88")
         self._floating_widget.show()
-        self._toast.success(f"已启动监控: {workflow_name}")
         logging.info("启动监控: %s", workflow_name)
 
     def _on_stop_monitoring(self):
         self._step_executor.stop()
-        self._panels["status_monitor"].update_status("停止中...", "#ffaa00")
-        self._floating_widget.update_status("停止中...", "#ffaa00")
+        self._panels["status_monitor"].update_status("停止中.", "#ffaa00")
+        self._floating_widget.update_status("停止中.", "#ffaa00")
 
     def _on_pause_monitoring(self):
         self._step_executor.pause()
-        self._panels["status_monitor"].update_status("停止中...", "#ffaa00")
-        self._floating_widget.update_status("停止中...", "#ffaa00")
+        self._panels["status_monitor"].update_status("已暂停", "#ffaa00")
+        self._floating_widget.update_status("已暂停", "#ffaa00")
 
     def _on_resume_monitoring(self):
         self._step_executor.resume()
@@ -949,13 +1014,13 @@ class MainWindow(QMainWindow):
         self._connection_label.setText("连接: 已连接" if connected else "连接: 断开")
 
     def _on_step_started(self, index: int, step_type: str):
-        logging.info("步骤 %d 开始 %s", index + 1, step_type)
+        logging.info("步骤 %d 开始: %s", index + 1, step_type)
 
     def _on_workflow_completed(self, name: str):
-        logging.info("工作流完成 %s", name)
+        logging.info("工作流完成: %s", name)
 
     def _on_workflow_failed(self, name: str, error: str):
-        logging.error("工作流失败 %s - %s", name, error)
+        logging.error("工作流失败: %s - %s", name, error)
 
     def _on_workflow_stopped(self):
         logging.info("工作流已停止")

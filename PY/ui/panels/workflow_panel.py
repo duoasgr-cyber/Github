@@ -25,25 +25,25 @@ from ui.components.step_editor import StepEditor
 
 
 STEP_TYPES = [
-    ("tap", "点击", {"type": "tap", "x": 0, "y": 0, "wait_after": 0, "comment": ""}),
-    ("long_press", "长按", {"type": "long_press", "x": 0, "y": 0, "duration": 1000, "wait_after": 0, "comment": ""}),
+    ("tap", "点击", {"type": "tap", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
+    ("long_press", "长按", {"type": "long_press", "x": 0, "y": 0, "duration": 1000, "comment": "", "wait_after": 0}),
     ("swipe", "滑动", {"type": "swipe", "x1": 0, "y1": 0, "x2": 0, "y2": 0, "duration": 300, "comment": ""}),
     ("keyevent", "按键", {"type": "keyevent", "key": "4", "comment": ""}),
     ("wait", "等待", {"type": "wait", "seconds": 1, "comment": ""}),
-    ("wifi", "WiFi控制", {"type": "wifi", "action": "enable", "wait_after": 0, "comment": ""}),
-    ("force_stop", "强制停止", {"type": "force_stop", "package": "", "wait_after": 0, "comment": ""}),
-    ("launch", "启动应用", {"type": "launch", "package": "", "wait_after": 0, "comment": ""}),
+    ("wifi", "WiFi控制", {"type": "wifi", "action": "enable", "comment": "", "wait_after": 0}),
+    ("force_stop", "强制停止", {"type": "force_stop", "package": "", "comment": "", "wait_after": 0}),
+    ("launch", "启动应用", {"type": "launch", "package": "", "comment": "", "wait_after": 0}),
     ("screenshot", "截图", {"type": "screenshot", "save_path": "", "comment": ""}),
     ("pull_file", "拉取文件", {"type": "pull_file", "remote": "", "local": "", "comment": ""}),
     ("delete_file", "删除文件", {"type": "delete_file", "path": "", "comment": ""}),
     ("check_image", "图像匹配", {"type": "check_image", "template": "", "threshold": 0.85, "comment": ""}),
     ("ocr_region", "OCR识别", {"type": "ocr_region", "region": {"left": 0, "top": 0, "right": 0, "bottom": 0}, "comment": ""}),
-    ("tap_point", "精确点击", {"type": "tap_point", "x": 0, "y": 0, "wait_after": 0, "comment": ""}),
+    ("tap_point", "精确点击", {"type": "tap_point", "x": 0, "y": 0, "comment": "", "wait_after": 0}),
     ("call_workflow", "调用工作流", {"type": "call_workflow", "workflow": "", "comment": ""}),
     ("condition", "条件判断", {"type": "condition", "check": {}, "then_steps": [], "else_steps": [], "comment": ""}),
     ("loop", "循环", {"type": "loop", "max_count": 10, "condition": {}, "steps": [], "comment": ""}),
     ("input_text", "输入文本", {"type": "input_text", "enabled": True, "display_name": "", "text": "", "comment": ""}),
-    ("variable", "变量处理", {"type": "variable", "enabled": True, "display_name": "", "var_name": "", "var_type": "string", "comment": ""}),
+    ("variable", "变量处理", {"type": "variable", "enabled": True, "display_name": "", "var_name": "", "var_type": "string", "var_value": "", "comment": ""}),
     ("adb_command", "ADB命令", {"type": "adb_command", "enabled": True, "display_name": "", "adb_cmd": "", "assign_variable": "", "comment": ""}),
     ("expression", "表达式", {"type": "expression", "expression": "", "assign_variable": "", "comment": ""}),
 ]
@@ -198,7 +198,7 @@ class StepTypeDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("选择步骤类型")
-        self.setMinimumSize(560, 520)
+        self.setMinimumSize(300, 400)
         self._selected_type = None
         self._setup_ui()
 
@@ -258,6 +258,10 @@ class StepTypeDialog(QDialog):
 
         # 底部按钮
         btn_layout = QHBoxLayout()
+        btn_ok = QPushButton("确定")
+        btn_cancel = QPushButton("取消")
+        btn_ok.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
         btn_layout.addStretch()
         btn_cancel = QPushButton("取消")
         btn_cancel.clicked.connect(self.reject)
@@ -279,11 +283,11 @@ class WorkflowPanel(QWidget):
     step_deleted = pyqtSignal(int)
     step_moved = pyqtSignal(int, int)
 
-    def __init__(self, config_manager: ConfigManager, screen_capture=None, step_executor=None, parent=None):
+    def __init__(self, config_manager: ConfigManager, screen_capture=None, device_manager=None, parent=None):
         super().__init__(parent)
         self._config_manager = config_manager
         self._screen_capture = screen_capture
-        self._step_executor = step_executor
+        self._device_manager = device_manager
         self._current_workflow_name: str = ""
         self._undo_stack = []
         self._redo_stack = []
@@ -308,11 +312,19 @@ class WorkflowPanel(QWidget):
         self._workflow_combo.currentIndexChanged.connect(self.on_workflow_selected)
         wf_toolbar.addWidget(self._workflow_combo, stretch=1)
 
-        btn_new_wf = self._create_icon_button("＋", "新建工作流", self._new_workflow)
+        btn_new_wf = QPushButton("新建")
+        btn_new_wf.setFixedHeight(28)
+        btn_new_wf.clicked.connect(self._new_workflow)
         wf_toolbar.addWidget(btn_new_wf)
-        btn_rename_wf = self._create_icon_button("✎", "重命名工作流", self._rename_workflow)
+
+        btn_rename_wf = QPushButton("重命名")
+        btn_rename_wf.setFixedHeight(28)
+        btn_rename_wf.clicked.connect(self._rename_workflow)
         wf_toolbar.addWidget(btn_rename_wf)
-        btn_delete_wf = self._create_icon_button("🗑", "删除工作流", self._delete_workflow)
+
+        btn_delete_wf = QPushButton("删除")
+        btn_delete_wf.setFixedHeight(28)
+        btn_delete_wf.clicked.connect(self._delete_workflow)
         wf_toolbar.addWidget(btn_delete_wf)
 
         main_layout.addLayout(wf_toolbar)
@@ -334,33 +346,33 @@ class WorkflowPanel(QWidget):
         step_toolbar = QHBoxLayout()
         step_toolbar.setSpacing(2)
 
-        # 添加组
-        btn_add = self._create_icon_button("＋", "添加步骤 (Ctrl+N)", self.add_step, "primary")
+        btn_add = QPushButton("添加步骤")
+        btn_add.setFixedHeight(28)
+        btn_add.clicked.connect(self.add_step)
         step_toolbar.addWidget(btn_add)
 
-        # 分隔线
-        step_toolbar.addWidget(self._create_separator())
-
-        # 编辑组
-        btn_copy = self._create_icon_button("⧉", "复制步骤 (Ctrl+D)", self.copy_step)
-        step_toolbar.addWidget(btn_copy)
-        btn_delete = self._create_icon_button("🗑", "删除步骤 (Delete)", self.delete_step, "danger")
+        btn_delete = QPushButton("删除步骤")
+        btn_delete.setFixedHeight(28)
+        btn_delete.clicked.connect(self.delete_step)
         step_toolbar.addWidget(btn_delete)
 
-        # 分隔线
-        step_toolbar.addWidget(self._create_separator())
+        btn_copy = QPushButton("复制步骤")
+        btn_copy.setFixedHeight(28)
+        btn_copy.clicked.connect(self.copy_step)
+        step_toolbar.addWidget(btn_copy)
 
-        # 排序组
-        btn_up = self._create_icon_button("↑", "上移", self.move_step_up)
+        btn_up = QPushButton("上移")
+        btn_up.setFixedHeight(28)
+        btn_up.clicked.connect(self.move_step_up)
         step_toolbar.addWidget(btn_up)
-        btn_down = self._create_icon_button("↓", "下移", self.move_step_down)
+
+        btn_down = QPushButton("下移")
+        btn_down.setFixedHeight(28)
+        btn_down.clicked.connect(self.move_step_down)
         step_toolbar.addWidget(btn_down)
-
-        # 分隔线
-        step_toolbar.addWidget(self._create_separator())
-
-        # 高级组
-        btn_snippet = self._create_icon_button("📋", "代码片段", self._open_snippet_manager)
+        btn_snippet = QPushButton("片段库")
+        btn_snippet.setFixedHeight(28)
+        btn_snippet.clicked.connect(self._open_snippet_manager)
         step_toolbar.addWidget(btn_snippet)
 
         # 撤销/重做
@@ -377,7 +389,16 @@ class WorkflowPanel(QWidget):
         left_layout.addLayout(step_toolbar)
 
         self._step_editor = StepEditor(config_manager=self._config_manager, parent=self)
-        self._step_editor.setMinimumHeight(280)
+        right_layout.addWidget(self._step_editor, stretch=3)
+
+        self._screenshot_picker = ScreenshotPicker(
+            screen_capture=self._screen_capture,
+            device_manager=self._device_manager,
+            config_manager=self._config_manager,
+            parent=self,
+        )
+        self._screenshot_picker.setMinimumWidth(240)
+        right_layout.addWidget(self._screenshot_picker, stretch=2)
 
         splitter.addWidget(left_widget)
         splitter.addWidget(self._step_editor)
@@ -756,7 +777,7 @@ class WorkflowPanel(QWidget):
         name = name.strip()
         workflows = self._config_manager.get_all_workflows()
         if name in workflows:
-            QMessageBox.warning(self, "提示", f"工作流'{name}' 已存在")
+            QMessageBox.warning(self, "提示", f"工作流 '{name}' 已存在")
             return
         workflow = {
             "description": "",
@@ -783,7 +804,7 @@ class WorkflowPanel(QWidget):
             return
         workflows = self._config_manager.get_all_workflows()
         if new_name in workflows:
-            QMessageBox.warning(self, "提示", f"工作流'{new_name}' 已存在")
+            QMessageBox.warning(self, "提示", f"工作流 '{new_name}' 已存在")
             return
         workflow_data = workflows.get(old_name, {})
         self._config_manager.delete_workflow(old_name)
