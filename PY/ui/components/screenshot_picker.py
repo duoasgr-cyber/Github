@@ -240,7 +240,11 @@ class ScreenshotPicker(QWidget):
     def __init__(self, screen_capture=None, parent=None):
         super().__init__(parent)
         self._screen_capture = screen_capture
+        self._live_mode = False
+        self._pick_mode = False
+        self._pick_group = None
         self._setup_ui()
+        self._update_empty_state()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -249,6 +253,12 @@ class ScreenshotPicker(QWidget):
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(4)
+
+        self._btn_live = QPushButton("投屏")
+        self._btn_live.setFixedHeight(26)
+        self._btn_live.setCheckable(True)
+        self._btn_live.clicked.connect(self._on_live_toggled)
+        toolbar.addWidget(self._btn_live)
 
         self._btn_capture = QPushButton("截屏")
         self._btn_capture.setFixedHeight(26)
@@ -280,14 +290,21 @@ class ScreenshotPicker(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setAlignment(Qt.AlignCenter)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setAlignment(Qt.AlignCenter)
         self._image_label = _ImageLabel()
         self._image_label.point_clicked.connect(self._on_point_clicked)
         self._image_label.mouse_position.connect(self.mouse_moved.emit)
-        scroll.setWidget(self._image_label)
-        layout.addWidget(scroll, stretch=1)
+        self._scroll.setWidget(self._image_label)
+        layout.addWidget(self._scroll, stretch=1)
+
+        self._empty_label = QLabel('设备未连接\n点击「投屏」开始实时投屏')
+        self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setFont(QFont("Microsoft YaHei", 12))
+        self._empty_label.setStyleSheet("color: #8b949e; background-color: #0d1117;")
+        layout.addWidget(self._empty_label)
+        self._empty_label.hide()
 
         info_bar = QHBoxLayout()
         self._coord_label = QLabel("设备坐标: (-, -)")
@@ -311,9 +328,48 @@ class ScreenshotPicker(QWidget):
     def _on_point_clicked(self, x: int, y: int):
         self._coord_label.setText(f"设备坐标: ({x}, {y})")
         self.point_selected.emit(x, y)
+        if self._pick_mode:
+            self.exit_pick_mode()
 
     def set_screen_capture(self, screen_capture):
+        if self._live_mode and self._screen_capture is not None:
+            try:
+                self._screen_capture.frame_captured.disconnect(self._on_live_frame)
+            except TypeError:
+                pass
         self._screen_capture = screen_capture
+        if self._live_mode and screen_capture is not None:
+            screen_capture.frame_captured.connect(self._on_live_frame)
+
+    def _on_live_toggled(self, checked: bool):
+        if checked:
+            self.start_live()
+        else:
+            self.stop_live()
+
+    def start_live(self):
+        if self._screen_capture is None:
+            self._btn_live.setChecked(False)
+            self._update_empty_state()
+            return
+        self._live_mode = True
+        self._btn_live.setChecked(True)
+        self._btn_live.setStyleSheet("background-color: #3fb950; color: white;")
+        self._screen_capture.frame_captured.connect(self._on_live_frame)
+        self._update_empty_state()
+
+    def stop_live(self):
+        self._live_mode = False
+        self._btn_live.setChecked(False)
+        self._btn_live.setStyleSheet("")
+        if self._screen_capture is not None:
+            try:
+                self._screen_capture.frame_captured.disconnect(self._on_live_frame)
+            except TypeError:
+                pass
+
+    def _on_live_frame(self, frame: np.ndarray):
+        self._display_frame(frame)
 
     def capture_and_display(self):
         if self._screen_capture is None:
@@ -328,7 +384,46 @@ class ScreenshotPicker(QWidget):
         bytes_per_line = ch * w
         q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
         pixmap = QPixmap.fromImage(q_img)
+        if self._live_mode and self._image_label._pixmap is None:
+            self._fit_to_viewport(w, h)
         self._image_label.set_pixmap(pixmap)
+        self._update_empty_state()
+
+    def _fit_to_viewport(self, img_w: int, img_h: int):
+        vp_w = max(self._scroll.viewport().width() - 4, 100)
+        vp_h = max(self._scroll.viewport().height() - 4, 100)
+        zoom_w = vp_w / img_w
+        zoom_h = vp_h / img_h
+        zoom = min(zoom_w, zoom_h, 1.0)
+        zoom_pct = int(zoom * 100)
+        self._zoom_slider.setValue(zoom_pct)
+
+    def enter_pick_mode(self, group_key: str = ""):
+        self._pick_mode = True
+        self._pick_group = group_key
+        self._scroll.setStyleSheet(
+            "QScrollArea { border: 2px solid #3fb950; border-radius: 4px; }"
+        )
+        if group_key in ("coord_src",):
+            self._coord_label.setText("选点模式: 起点 (在投屏上点击)")
+        elif group_key in ("coord_dst",):
+            self._coord_label.setText("选点模式: 终点 (在投屏上点击)")
+        else:
+            self._coord_label.setText("选点模式: (在投屏上点击)")
+
+    def exit_pick_mode(self):
+        self._pick_mode = False
+        self._pick_group = None
+        self._scroll.setStyleSheet("")
+
+    def _update_empty_state(self):
+        has_frame = self._image_label._pixmap is not None
+        if has_frame:
+            self._empty_label.hide()
+            self._scroll.show()
+        else:
+            self._empty_label.show()
+            self._scroll.hide()
 
     def clear_markers(self):
         self._image_label.clear_markers()

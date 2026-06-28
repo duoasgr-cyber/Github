@@ -1,4 +1,4 @@
-﻿from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ui.components.field_group_widget import FieldGroupWidget
 
 
 STEP_FIELD_DEFS = {
@@ -39,41 +41,180 @@ STEP_FIELD_DEFS = {
     "expression": ["enabled", "display_name", "expression", "assign_variable", "comment"],
 }
 
+# 字段分组定义：key -> (标题, 颜色, 是否坐标组)
+FIELD_GROUPS = {
+    "basic":     {"label": "基本属性",   "color": "#58a6ff"},  # 蓝色
+    "coord":     {"label": "坐标参数",   "color": "#3fb950"},  # 绿色
+    "coord_src": {"label": "起点坐标",   "color": "#3fb950"},  # 绿色
+    "coord_dst": {"label": "终点坐标",   "color": "#3fb950"},  # 绿色
+    "action":    {"label": "动作参数",   "color": "#f0883e"},  # 橙色
+    "detect":    {"label": "识别参数",   "color": "#bc8cff"},  # 紫色
+    "flow":      {"label": "流程控制",   "color": "#f0883e"},  # 橙色
+    "post":      {"label": "执行后处理", "color": "#bc8cff"},  # 紫色
+    "output":    {"label": "变量输出",   "color": "#bc8cff"},  # 紫色
+}
+
+# 坐标类分组：这些分组会在卡片右上角显示"投屏选点"按钮
+COORD_GROUP_KEYS = {"coord", "coord_src", "coord_dst"}
+
+# 每个步骤类型的字段分组：(分组key, [字段名列表])
+STEP_FIELD_GROUPS = {
+    "tap": [
+        ("basic", ["enabled", "display_name"]),
+        ("coord", ["x", "y"]),
+        ("post",  ["comment", "wait_after"]),
+    ],
+    "tap_point": [
+        ("basic", ["enabled", "display_name"]),
+        ("coord", ["x", "y"]),
+        ("post",  ["comment", "wait_after"]),
+    ],
+    "long_press": [
+        ("basic",  ["enabled", "display_name"]),
+        ("coord",  ["x", "y"]),
+        ("action", ["duration"]),
+        ("post",   ["comment", "wait_after"]),
+    ],
+    "swipe": [
+        ("basic",     ["enabled", "display_name"]),
+        ("coord_src", ["x1", "y1"]),
+        ("coord_dst", ["x2", "y2"]),
+        ("action",    ["duration"]),
+        ("post",      ["comment"]),
+    ],
+    "keyevent": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["key"]),
+        ("post",   ["comment"]),
+    ],
+    "wait": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["seconds"]),
+        ("post",   ["comment"]),
+    ],
+    "wifi": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["action"]),
+        ("post",   ["comment", "wait_after"]),
+    ],
+    "force_stop": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["package"]),
+        ("post",   ["comment", "wait_after"]),
+    ],
+    "launch": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["package"]),
+        ("post",   ["comment", "wait_after"]),
+    ],
+    "screenshot": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["save_path"]),
+        ("post",   ["comment"]),
+    ],
+    "pull_file": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["remote", "local"]),
+        ("post",   ["comment"]),
+    ],
+    "delete_file": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["path"]),
+        ("post",   ["comment"]),
+    ],
+    "check_image": [
+        ("basic",  ["enabled", "display_name"]),
+        ("detect", ["template", "threshold"]),
+        ("output", ["assign_variable"]),
+        ("post",   ["comment"]),
+    ],
+    "ocr_region": [
+        ("basic",  ["enabled", "display_name"]),
+        ("detect", ["region"]),
+        ("output", ["assign_variable"]),
+        ("post",   ["comment"]),
+    ],
+    "call_workflow": [
+        ("basic", ["enabled", "display_name"]),
+        ("flow",  ["workflow"]),
+        ("post",  ["comment"]),
+    ],
+    "condition": [
+        ("basic", ["enabled", "display_name"]),
+        ("flow",  ["check"]),
+        ("flow",  ["then_mode", "then_workflow", "then_steps"]),
+        ("flow",  ["else_mode", "else_workflow", "else_steps"]),
+        ("post",  ["comment"]),
+    ],
+    "loop": [
+        ("basic", ["enabled", "display_name"]),
+        ("flow",  ["max_count", "condition"]),
+        ("flow",  ["steps"]),
+        ("post",  ["comment"]),
+    ],
+    "input_text": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["text"]),
+        ("post",   ["comment"]),
+    ],
+    "variable": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["var_name", "var_type", "var_value"]),
+        ("post",   ["comment"]),
+    ],
+    "adb_command": [
+        ("basic",  ["enabled", "display_name"]),
+        ("action", ["adb_cmd"]),
+        ("output", ["assign_variable"]),
+        ("post",   ["comment"]),
+    ],
+    "expression": [
+        ("basic",  ["enabled", "display_name"]),
+        ("detect", ["expression"]),
+        ("output", ["assign_variable"]),
+        ("post",   ["comment"]),
+    ],
+}
+
 FIELD_LABELS = {
-    "enabled": "鍚敤",
-    "display_name": "鏄剧ず鍚嶇О",
-    "x": "X鍧愭爣",
-    "y": "Y鍧愭爣",
-    "x1": "璧风偣X",
-    "y1": "璧风偣Y",
-    "x2": "缁堢偣X",
-    "y2": "缁堢偣Y",
-    "duration": "鏃堕暱(ms)",
-    "comment": "澶囨敞",
-    "wait_after": "绛夊緟鍚?ms)",
-    "key": "鎸夐敭",
-    "seconds": "绉掓暟",
-    "action": "鍔ㄤ綔",
-    "package": "鍖呭悕",
-    "save_path": "淇濆瓨璺緞",
-    "remote": "杩滅▼璺緞",
-    "local": "鏈湴璺緞",
-    "path": "鏂囦欢璺緞",
-    "template": "妯℃澘璺緞",
-    "threshold": "闃堝€?,
-    "region": "鍖哄煙",
-    "workflow": "宸ヤ綔娴?,
-    "check": "鏉′欢",
-    "then_steps": "婊¤冻姝ラ",
-    "else_steps": "涓嶆弧瓒虫楠?,
-    "max_count": "鏈€澶ф鏁?,
-    "steps": "姝ラ",
-    "text": "鏂囨湰",
-    "var_name": "鍙橀噺鍚?,
-    "var_type": "鍙橀噺绫诲瀷",
-    "var_value": "鍙橀噺鍊?,
-    "adb_cmd": "ADB鍛戒护",
-    "assign_variable": "缁撴灉瀛樺叆鍙橀噺",
+    "enabled": "启用",
+    "display_name": "显示名称",
+    "x": "X",
+    "y": "Y",
+    "x1": "起点X",
+    "y1": "起点Y",
+    "x2": "终点X",
+    "y2": "终点Y",
+    "duration": "时长(ms)",
+    "comment": "备注",
+    "wait_after": "等待后(ms)",
+    "key": "按键",
+    "seconds": "秒数",
+    "action": "动作",
+    "package": "包名",
+    "save_path": "保存路径",
+    "remote": "远程路径",
+    "local": "本地路径",
+    "path": "文件路径",
+    "template": "模板路径",
+    "threshold": "阈值",
+    "region": "区域",
+    "workflow": "工作流",
+    "check": "条件",
+    "then_mode": "满足时",
+    "then_workflow": "满足-工作流",
+    "then_steps": "满足-步骤",
+    "else_mode": "不满足时",
+    "else_workflow": "不满足-工作流",
+    "else_steps": "不满足-步骤",
+    "max_count": "最大次数",
+    "steps": "步骤",
+    "text": "文本",
+    "var_name": "变量名",
+    "var_type": "变量类型",
+    "var_value": "变量值",
+    "adb_cmd": "ADB命令",
+    "assign_variable": "结果存入变量",
 }
 
 WIFI_ACTIONS = ["enable", "disable", "toggle"]
@@ -86,9 +227,17 @@ COMBO_FIELDS = {"action", "workflow", "var_type"}
 BOOL_FIELDS = {"enabled"}
 CHECKBOX_FIELDS = {"enabled"}
 
+# condition 分支模式字段：满足/不满足时，选择"内嵌步骤"还是"调用工作流"
+BRANCH_MODE_FIELDS = {"then_mode", "else_mode"}
+BRANCH_WORKFLOW_FIELDS = {"then_workflow", "else_workflow"}
+BRANCH_STEPS_FIELDS = {"then_steps", "else_steps"}
+BRANCH_MODE_EMBEDDED = "内嵌步骤"
+BRANCH_MODE_WORKFLOW = "调用工作流"
+
 
 class StepEditor(QScrollArea):
     step_changed = pyqtSignal(dict)
+    coord_pick_requested = pyqtSignal(str)
 
     def __init__(self, config_manager=None, parent=None):
         super().__init__(parent)
@@ -96,6 +245,8 @@ class StepEditor(QScrollArea):
         self._current_step = {}
         self._current_index = -1
         self._field_widgets = {}
+        self._field_labels = {}
+        self._active_pick_group = None
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(400)
@@ -110,7 +261,7 @@ class StepEditor(QScrollArea):
         self._layout.setContentsMargins(8, 8, 8, 8)
         self._layout.setSpacing(4)
 
-        self._placeholder = QLabel("閫夋嫨姝ラ浠ョ紪杈?)
+        self._placeholder = QLabel("选择步骤以编辑")
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setFont(QFont("Microsoft YaHei", 14))
         self._placeholder.setStyleSheet("color: #aaaaaa;")
@@ -119,7 +270,7 @@ class StepEditor(QScrollArea):
         self._form_widget = QWidget()
         self._form_layout = QVBoxLayout(self._form_widget)
         self._form_layout.setContentsMargins(0, 0, 0, 0)
-        self._form_layout.setSpacing(4)
+        self._form_layout.setSpacing(8)
         self._form_widget.setVisible(False)
         self._layout.addWidget(self._form_widget)
 
@@ -152,34 +303,75 @@ class StepEditor(QScrollArea):
                 w.deleteLater()
 
         self._field_widgets.clear()
+        self._field_labels.clear()
+        self._active_pick_group = None
 
         step_type = self._current_step.get("type", "")
-        type_label = QLabel("绫诲瀷: {}".format(step_type))
+        type_label = QLabel("类型: {}".format(step_type))
         type_label.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
         self._form_layout.addWidget(type_label)
 
-        fields = STEP_FIELD_DEFS.get(step_type, [])
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setSpacing(4)
+        groups = STEP_FIELD_GROUPS.get(step_type, [])
+        for group_key, field_names in groups:
+            group_def = FIELD_GROUPS.get(
+                group_key, {"label": group_key, "color": "#8b949e"}
+            )
+            is_coord = group_key in COORD_GROUP_KEYS
+            group_widget = FieldGroupWidget(
+                group_key, group_def, coord_pick=is_coord, parent=self
+            )
 
-        for field_name in fields:
-            widget = self._create_field_widget(field_name)
-            self._field_widgets[field_name] = widget
-            label_text = FIELD_LABELS.get(field_name, field_name)
-            form.addRow("{}:".format(label_text), widget)
-            value = self._current_step.get(field_name)
-            self._set_field_value(widget, field_name, value)
+            for field_name in field_names:
+                widget = self._create_field_widget(field_name)
+                self._field_widgets[field_name] = widget
+                label_text = FIELD_LABELS.get(field_name, field_name)
+                group_widget.form_layout.addRow(
+                    "{}:".format(label_text), widget
+                )
+                self._field_labels[field_name] = group_widget.form_layout.labelForField(widget)
+                value = self._current_step.get(field_name)
+                self._set_field_value(widget, field_name, value)
 
-        form_widget = QWidget()
-        form_widget.setLayout(form)
-        self._form_layout.addWidget(form_widget)
+            group_widget.pick_requested.connect(self._on_pick_requested)
+            self._form_layout.addWidget(group_widget)
+
+        # condition 分支模式联动显示
+        self._apply_branch_visibility()
+
+    def _on_pick_requested(self, group_key):
+        self._active_pick_group = group_key
+        self.coord_pick_requested.emit(group_key)
 
     def _create_field_widget(self, field_name):
         if field_name in CHECKBOX_FIELDS:
             cb = QCheckBox()
             cb.stateChanged.connect(lambda: self._on_field_changed())
             return cb
+
+        # condition 分支模式：内嵌步骤 / 调用工作流
+        if field_name in BRANCH_MODE_FIELDS:
+            combo = QComboBox()
+            combo.setFont(QFont("Microsoft YaHei", 9))
+            combo.addItems([BRANCH_MODE_EMBEDDED, BRANCH_MODE_WORKFLOW])
+            combo.currentIndexChanged.connect(lambda: self._on_branch_mode_changed(field_name))
+            return combo
+
+        # condition 分支调用的工作流名
+        if field_name in BRANCH_WORKFLOW_FIELDS:
+            combo = QComboBox()
+            combo.setFont(QFont("Microsoft YaHei", 9))
+            if self._config_manager:
+                workflows = self._config_manager.get_all_workflows()
+                combo.addItems(sorted(workflows.keys()) if isinstance(workflows, dict) else workflows)
+            combo.currentIndexChanged.connect(lambda: self._on_field_changed())
+            return combo
+
+        # condition 分支内嵌步骤列表（只读计数展示）
+        if field_name in BRANCH_STEPS_FIELDS:
+            label = QLabel("0 个步骤")
+            label.setFont(QFont("Microsoft YaHei", 9))
+            label.setStyleSheet("color: #8b949e;")
+            return label
 
         if field_name in COMBO_FIELDS:
             combo = QComboBox()
@@ -244,6 +436,10 @@ class StepEditor(QScrollArea):
             widget.setValue(int(value) if value is not None else 0)
         elif isinstance(widget, QDoubleSpinBox):
             widget.setValue(float(value) if value is not None else 0.0)
+        elif isinstance(widget, QLabel) and field_name in BRANCH_STEPS_FIELDS:
+            # 内嵌步骤列表：只读展示步骤数量
+            count = len(value) if isinstance(value, list) else 0
+            widget.setText("{} 个步骤".format(count))
         elif isinstance(widget, QLineEdit):
             text = str(value) if value is not None else ""
             if field_name == "region" and isinstance(value, dict):
@@ -262,6 +458,9 @@ class StepEditor(QScrollArea):
             return widget.value()
         if isinstance(widget, QDoubleSpinBox):
             return widget.value()
+        if isinstance(widget, QLabel) and field_name in BRANCH_STEPS_FIELDS:
+            # 内嵌步骤列表不可直接编辑，保留原值
+            return self._current_step.get(field_name, [])
         if isinstance(widget, QLineEdit):
             text = widget.text()
             if field_name == "region":
@@ -284,6 +483,30 @@ class StepEditor(QScrollArea):
         self._current_step = updated
         self._save_timer.start()
 
+    def _on_branch_mode_changed(self, mode_field):
+        self._on_field_changed()
+        self._apply_branch_visibility()
+
+    def _apply_branch_visibility(self):
+        """根据 then_mode/else_mode 显示对应的工作流行或步骤行，隐藏另一行。"""
+        for branch in ("then", "else"):
+            mode_widget = self._field_widgets.get("{}_mode".format(branch))
+            wf_widget = self._field_widgets.get("{}_workflow".format(branch))
+            steps_widget = self._field_widgets.get("{}_steps".format(branch))
+            wf_label = self._field_labels.get("{}_workflow".format(branch))
+            steps_label = self._field_labels.get("{}_steps".format(branch))
+            if not mode_widget:
+                continue
+            is_workflow_mode = mode_widget.currentText() == BRANCH_MODE_WORKFLOW
+            if wf_widget:
+                wf_widget.setVisible(is_workflow_mode)
+            if wf_label:
+                wf_label.setVisible(is_workflow_mode)
+            if steps_widget:
+                steps_widget.setVisible(not is_workflow_mode)
+            if steps_label:
+                steps_label.setVisible(not is_workflow_mode)
+
     def _emit_step_changed(self):
         self.step_changed.emit(dict(self._current_step))
 
@@ -298,13 +521,22 @@ class StepEditor(QScrollArea):
             self._current_step["x"] = x
             self._current_step["y"] = y
         elif step_type == "swipe":
-            if "x2" in self._field_widgets:
-                self._field_widgets["x2"].setValue(x)
-            if "y2" in self._field_widgets:
-                self._field_widgets["y2"].setValue(y)
-            self._current_step["x2"] = x
-            self._current_step["y2"] = y
+            if self._active_pick_group == "coord_src":
+                if "x1" in self._field_widgets:
+                    self._field_widgets["x1"].setValue(x)
+                if "y1" in self._field_widgets:
+                    self._field_widgets["y1"].setValue(y)
+                self._current_step["x1"] = x
+                self._current_step["y1"] = y
+            else:
+                if "x2" in self._field_widgets:
+                    self._field_widgets["x2"].setValue(x)
+                if "y2" in self._field_widgets:
+                    self._field_widgets["y2"].setValue(y)
+                self._current_step["x2"] = x
+                self._current_step["y2"] = y
         self._updating = False
+        self._active_pick_group = None
         self.step_changed.emit(self._current_step)
 
     def get_current_step(self):

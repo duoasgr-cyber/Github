@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import threading
 import logging
@@ -216,6 +216,29 @@ class ConfigManager:
             if "workflows" in workflows and name in workflows["workflows"]:
                 del workflows["workflows"][name]
                 self._atomic_write(self._workflows_path, workflows)
+
+    # ---- 主流程编排 (main_flow) ----
+    # main_flow 是工作流间编排的顶层字段，结构示例:
+    #   "main_flow": {
+    #       "description": "主流程说明",
+    #       "steps": [
+    #           {"type": "call_workflow", "workflow": "refresh_price"},
+    #           {"type": "condition", "check": {...},
+    #            "then_mode": "workflow", "then_workflow": "card_mail",
+    #            "else_mode": "workflow", "else_workflow": "no_match"}
+    #       ]
+    #   }
+
+    def get_main_flow(self) -> dict:
+        with self._lock:
+            workflows = self._ensure_workflows()
+            return workflows.get("main_flow", {"description": "", "steps": []})
+
+    def set_main_flow(self, main_flow: dict) -> None:
+        with self._lock:
+            workflows = self._ensure_workflows()
+            workflows["main_flow"] = main_flow
+            self._atomic_write(self._workflows_path, workflows)
 
     def reload(self) -> None:
         with self._lock:
