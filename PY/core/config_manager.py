@@ -56,7 +56,16 @@ class ConfigManager:
                 "width": 2400,
                 "height": 1080
             },
-            "scrcpy_server_path": "lib/scrcpy-server.jar"
+            "scrcpy_server_path": "lib/scrcpy-server.jar",
+            "cast": {
+                "server_version": "2.0",
+                "video_codec": "h264",
+                "bit_rate": 2000000,
+                "max_size": 1080,
+                "max_fps": 30,
+                "startup_wait": 1.5,
+                "skip_push_if_exists": True
+            }
         },
         "timing": {
             "default_wait": 1.5,

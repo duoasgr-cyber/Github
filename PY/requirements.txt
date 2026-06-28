@@ -1,6 +1,7 @@
-PyQt5>=5.15,<5.16
-easyocr>=1.7,<2.0
-opencv-python>=4.8,<5.0
-numpy>=1.24,<2.0
-Pillow>=10.0,<11.0
-pyinstaller>=6.0,<7.0
+PyQt5>=5.15
+easyocr>=1.7
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=10.0
+av>=10.0  # 可选：进程内 H.264 解码，缺失时自动回退 ffmpeg
+pyinstaller>=6.0

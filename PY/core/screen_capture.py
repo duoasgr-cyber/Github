@@ -26,9 +26,13 @@ from av.codec import CodecContext
 from av.error import InvalidDataError
 from PyQt5.QtCore import QObject, pyqtSignal
 
-if sys.platform == "win32":
-    import ctypes
-    import msvcrt
+try:
+    import av as _av
+    _HAS_PYAV = True
+except ImportError:
+    _av = None
+    _HAS_PYAV = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +188,33 @@ def _get_scrcpy_version() -> str:
 # screencap 回退采集间隔（秒）
 _SCREENCAP_INTERVAL = 0.2
 
+_SUPPORTED_CODECS = ("h264", "h265", "av1")
+
+
+class CastOptions:
+    """投屏启动参数（与 config.json 的 device.cast 对应）。
+
+    保持向后兼容：所有字段均有默认值，与 P1 之前的行为一致。
+    """
+
+    def __init__(
+        self,
+        server_version: str = "2.0",
+        video_codec: str = "h264",
+        bit_rate: int = 2000000,
+        max_size: int = 1080,
+        max_fps: int = 30,
+        startup_wait: float = _SERVER_STARTUP_WAIT,
+        skip_push_if_exists: bool = True,
+    ):
+        self.server_version = server_version
+        self.video_codec = video_codec if video_codec in _SUPPORTED_CODECS else "h264"
+        self.bit_rate = int(bit_rate)
+        self.max_size = int(max_size)
+        self.max_fps = int(max_fps)
+        self.startup_wait = float(startup_wait)
+        self.skip_push_if_exists = bool(skip_push_if_exists)
+
 
 class ScrcpyCapture(QObject):
     """双模式屏幕采集：scrcpy 高速 + screencap 回退。
@@ -203,56 +234,53 @@ class ScrcpyCapture(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._running = False
-        self._connected = False
-        self._lock = threading.Lock()
-
-        # 当前帧缓存
+        self._device_serial: Optional[str] = None
+        self._server_jar_path: Optional[str] = None
+        self._connected: bool = False
+        self._use_scrcpy: bool = False
         self._current_frame: Optional[np.ndarray] = None
-
-        # 帧版本号（每次 set_current_frame 递增，UI 用此判断是否有新帧）
-        self._frame_version: int = 0
-
-        # 设备分辨率（从 scrcpy 头部解析，用于 rawvideo 帧计算）
-        self._frame_width: int = 0
-        self._frame_height: int = 0
-
-        # 设备信息
-        self._serial: str = ""
-        self._server_jar: str = ""
-        self._max_retries: int = 3
-
-        # 子进程 / 连接
+        self._frame_lock = threading.Lock()
+        self._cleanup_lock = threading.Lock()
         self._server_process: Optional[subprocess.Popen] = None
-        self._video_socket: Optional[socket.socket] = None
-        self._local_port: int = 0
+        self._socket: Optional[socket.socket] = None
+        self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._writer_thread: Optional[threading.Thread] = None
+        self._decoder_thread: Optional[threading.Thread] = None
+        self._fallback_thread: Optional[threading.Thread] = None
+        self._forward_port: int = _DEFAULT_FORWARD_PORT
+        self._stopping: bool = False
+        self._reconnect_count: int = 0
+        self._max_reconnect: int = 3
+        self._last_emit_time: float = 0.0
+        self._generation: int = 0
+        self._frame_w: int = 0
+        self._frame_h: int = 0
+        self._cast_options: CastOptions = CastOptions()
+        self._use_pyav: bool = _HAS_PYAV
+        self._av_codec = None
 
-        # 采集线程
-        self._capture_thread: Optional[threading.Thread] = None
-
-        # 连接状态跟踪
-        self._was_connected: bool = False
-
-    # ===================================================================
-    #  公开接口
-    # ===================================================================
-
-    def start(self, serial: str = "", server_jar_path: str = None, max_retries: int = 3):
-        """启动屏幕采集。
-
-        Args:
-            serial: 设备序列号（空则使用 adb 默认设备）
-            server_jar_path: scrcpy-server.jar 路径（None 用默认值）
-            max_retries: scrcpy 失败后的最大重试次数
-        """
-        if self._running:
-            logger.warning("屏幕采集已在运行，先停止再重启")
+    def start(
+        self,
+        device_serial: str,
+        server_jar_path: str,
+        max_retries: int = 3,
+        cast_options: Optional[CastOptions] = None,
+    ) -> bool:
+        if self._connected:
             self.stop()
 
-        self._serial = serial
-        self._server_jar = server_jar_path or _DEFAULT_SERVER_JAR
-        self._max_retries = max_retries
-        self._running = True
+        self._device_serial = device_serial
+        self._server_jar_path = server_jar_path
+        self._stopping = False
+        self._max_reconnect = max_retries
+        self._cast_options = cast_options or CastOptions()
+        if self._cast_options.video_codec != "h264":
+            if not self._probe_codec_supported(self._cast_options.video_codec):
+                logger.warning(
+                    "设备不支持 video_codec=%s，回退到 h264",
+                    self._cast_options.video_codec,
+                )
+                self._cast_options.video_codec = "h264"
 
         # 在后台线程中启动采集，避免阻塞 UI
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True, name="screen-capture")
@@ -297,293 +325,46 @@ class ScrcpyCapture(QObject):
         with self._lock:
             return self._frame_version
 
-    def get_current_frame_if_new(self, last_version: int) -> Optional[tuple]:
-        """如果帧版本号大于 last_version，返回 (帧引用, 新版本号)；否则返回 None。
-
-        UI 用此方法避免重复渲染同一帧。
-
-        性能优化：返回内部缓存的引用而非拷贝。
-        采集线程每次 to_ndarray() 生成新数组，永不修改旧数组；
-        UI 线程只读不写（QImage 仅读取 data 指针），因此直接返回引用是安全的。
-        消除 1080×2400 RGB 帧 ~7.4MB/帧 的内存拷贝。
-        """
-        with self._lock:
-            if self._frame_version > last_version and self._current_frame is not None:
-                return (self._current_frame, self._frame_version)
-            return None
-
-    def capture_screenshot(self) -> Optional[np.ndarray]:
-        """兼容接口：返回当前帧。"""
-        if not self.is_connected():
-            return None
-        return self.get_current_frame()
-
-    def set_current_frame(self, frame: np.ndarray):
-        """由采集后端调用，缓存最新帧。
-
-        缓存帧后 emit frame_ready 信号，UI 通过信号 + 版本号获取新帧，
-        替代固定间隔轮询，将显示唤醒延迟从 0~8ms 降到 ~0ms。
-        信号队列不会堆积：UI slot 用版本号跳过已渲染帧。
-        """
-        with self._lock:
-            self._current_frame = frame
-            self._frame_version += 1
-        # 通知 UI 有新帧（信号驱动，零延迟通知）
-        try:
-            self.frame_ready.emit()
-        except RuntimeError:
-            pass  # 信号已断开（UI 关闭等）
-
-    def set_device(self, serial: str):
-        """切换到不同设备。"""
-        was_running = self._running
-        if was_running:
-            self.stop()
-        if was_running:
-            self.start(serial)
-
-    # ===================================================================
-    #  采集主循环（后台线程）
-    # ===================================================================
-
-    def _capture_loop(self):
-        """采集主循环：先尝试 scrcpy，失败则回退到 screencap。"""
-        retry_count = 0
-
-        while self._running:
-            # 1. 尝试 scrcpy 模式
-            if self._try_start_scrcpy():
-                logger.info("scrcpy 模式启动成功")
-                self._set_connected(True)
-                self._scrcpy_read_loop()
-                # 从 scrcpy 循环退出说明连接断开
-                self._cleanup_scrcpy()
-                if not self._running:
-                    break
-                # 断连处理
-                self._set_connected(False)
-                retry_count += 1
-                if retry_count <= self._max_retries:
-                    wait_time = min(retry_count * 1.0, 5.0)
-                    logger.warning("scrcpy 连接断开，%0.1fs 后重试 (%d/%d)", wait_time, retry_count, self._max_retries)
-                    if not self._interruptible_sleep(wait_time):
-                        break
-                    continue
-                else:
-                    logger.warning(
-                        "scrcpy 重试次数耗尽 (%d)，回退到 screencap 模式（低帧率截图模式，约 5fps，投屏可能卡顿）",
-                        self._max_retries,
-                    )
-            else:
-                logger.warning("scrcpy 启动失败，回退到 screencap 模式（低帧率截图模式，约 5fps，投屏可能卡顿）")
-
-            # 2. screencap 回退模式
-            self._cleanup_scrcpy()
-            self._set_connected(True)
-            self._screencap_loop()
-            self._set_connected(False)
-
-            # screencap 退出后不再自动重试（除非外部再次调用 start）
-            break
-
-    # ===================================================================
-    #  Scrcpy 模式
-    # ===================================================================
-
-    def _try_start_scrcpy(self) -> bool:
-        """尝试启动 scrcpy server 并建立连接。返回是否成功。"""
-        # 检查 JAR 文件
-        if not os.path.isfile(self._server_jar):
-            logger.warning("scrcpy-server.jar 不存在: %s", self._server_jar)
-            return False
-
-        try:
-            # 0. 确定传给 server 的版本参数
-            # 策略：始终以客户端版本为准（因为 client 和 server 来自同一发布包，版本必须一致）
-            # JAR 内部版本检测仅作参考日志（4.0 的 JAR 中版本号嵌入方式不可靠）
-            client_version = _get_scrcpy_version()
-            jar_detected_version = _detect_server_jar_version(self._server_jar)
-
-            if jar_detected_version:
-                jar_major = _parse_major_version(jar_detected_version)
-                client_major = _parse_major_version(client_version)
-                # 如果 JAR 检测到的版本与客户端不一致，记录警告但不影响运行
-                if jar_major != client_major or jar_major > 5:
-                    logger.warning(
-                        "JAR 版本检测 (%s, major=%d) 与客户端 (%s, major=%d) 不一致或异常，"
-                        "将以客户端版本 %s 作为 server 参数",
-                        jar_detected_version, jar_major,
-                        client_version, client_major,
-                        client_version,
-                    )
-                else:
-                    logger.info("从 JAR 检测到 scrcpy server 版本: %s", jar_detected_version)
-
-            server_version = client_version
-            logger.info("使用客户端版本作为 server 版本参数: %s", server_version)
-
-            # 0.1 版本兼容性检查
-            self._validate_version_compatibility(client_version, server_version)
-
-            # 1. 杀死设备上残留的 scrcpy server 进程
-            self._kill_existing_server()
-
-            # 2. 推送 server JAR 到设备
-            push_cmd = ["adb"]
-            if self._serial:
-                push_cmd += ["-s", self._serial]
-            push_cmd += ["push", self._server_jar, "/data/local/tmp/scrcpy-server.jar"]
+    def _start_scrcpy(self) -> bool:
+        opts = self._cast_options
+        if opts.skip_push_if_exists and self._remote_jar_matches_local():
+            logger.debug("远端 scrcpy-server.jar 大小一致，跳过 push")
+        else:
+            push_cmd = [
+                "adb", "-s", self._device_serial, "push",
+                self._server_jar_path, "/data/local/tmp/scrcpy-server.jar"
+            ]
             result = subprocess.run(
-                push_cmd, capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
+                push_cmd, capture_output=True, timeout=30,
+                creationflags=_SUBPROCESS_FLAGS
             )
             if result.returncode != 0:
-                logger.error("推送 scrcpy-server 失败: %s", result.stderr.strip())
-                return False
-            logger.info("scrcpy-server.jar 推送成功")
-
-            # 3. 启动 scrcpy server 子进程（先启动 server，再设置转发）
-            self._start_server_process(server_version)
-            if self._server_process is None:
-                return False
-
-            # 4. 设置端口转发（server 启动后设置，确保 localabstract socket 已就绪）
-            self._local_port = _SCRCPY_DEFAULT_PORT
-            self._setup_adb_forward()
-
-            # 5. 连接 socket（等待 server 就绪）
-            self._video_socket = self._connect_socket()
-            if self._video_socket is None:
-                logger.error("无法连接 scrcpy socket")
-                self._log_server_stderr()
-                self._cleanup_scrcpy()
-                return False
-
-            # 6. 自适应读取协议头部（兼容 2.x / 3.x / 4.x）
-            if not self._read_scrcpy_header(server_version):
-                self._log_server_stderr()
-                self._cleanup_scrcpy()
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error("scrcpy 启动异常: %s", e)
-            self._cleanup_scrcpy()
-            return False
-
-    def _kill_existing_server(self):
-        """杀死设备上残留的 scrcpy server 进程，避免 socket 冲突。"""
-        try:
-            # 先尝试优雅停止
-            kill_cmd = ["adb"]
-            if self._serial:
-                kill_cmd += ["-s", self._serial]
-            kill_cmd += ["shell", "pkill", "-f", "scrcpy-server.jar"]
-            subprocess.run(kill_cmd, capture_output=True, timeout=3, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO)
-            # 等待进程完全退出（避免竞态）
-            time.sleep(0.5)
-
-            # 验证是否已退出，如果还在则强制杀死
-            check_cmd = ["adb"]
-            if self._serial:
-                check_cmd += ["-s", self._serial]
-            check_cmd += ["shell", "pidof", "com.genymobile.scrcpy.Server"]
-            result = subprocess.run(
-                check_cmd, capture_output=True, text=True, timeout=3, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
-            )
-            if result.stdout.strip():
-                # 进程仍在运行，强制杀死
-                force_cmd = ["adb"]
-                if self._serial:
-                    force_cmd += ["-s", self._serial]
-                force_cmd += ["shell", "pkill", "-9", "-f", "scrcpy-server.jar"]
-                subprocess.run(
-                    force_cmd, capture_output=True, timeout=3, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
-                )
-                time.sleep(0.3)
-                logger.debug("已强制清理设备上残留的 scrcpy server 进程")
-            else:
-                logger.debug("已清理设备上残留的 scrcpy server 进程")
-        except Exception as e:
-            logger.debug("清理残留 server 进程失败（可能不存在）: %s", e)
-
-    def _setup_adb_forward(self):
-        """设置 adb 端口转发。"""
-        # 清理旧的端口转发，避免残留转发导致连接异常
-        remove_cmd = ["adb"]
-        if self._serial:
-            remove_cmd += ["-s", self._serial]
-        remove_cmd += ["forward", "--remove", f"tcp:{self._local_port}"]
-        try:
-            subprocess.run(
-                remove_cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                creationflags=_NO_WINDOW,
-                startupinfo=_STARTUPINFO,
-            )
-        except Exception:
-            logger.debug("清理旧端口转发失败（可能不存在）")
-
-        cmd = ["adb"]
-        if self._serial:
-            cmd += ["-s", self._serial]
-        cmd += ["forward", f"tcp:{self._local_port}", f"localabstract:scrcpy"]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
-        )
-        if result.returncode == 0:
-            logger.info("端口转发设置成功: tcp:%d -> localabstract:scrcpy", self._local_port)
-        else:
-            logger.warning("端口转发 tcp:%d 失败: %s，尝试随机端口", self._local_port, result.stderr.strip())
-            # 尝试不同的端口
-            cmd_retry = ["adb"]
-            if self._serial:
-                cmd_retry += ["-s", self._serial]
-            cmd_retry += ["forward", "tcp:0", "localabstract:scrcpy"]
-            result = subprocess.run(
-                cmd_retry, capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW, startupinfo=_STARTUPINFO
-            )
-            if result.returncode == 0 and result.stdout.strip().isdigit():
-                self._local_port = int(result.stdout.strip())
-                logger.info("端口转发设置成功（随机端口）: tcp:%d", self._local_port)
-            else:
-                logger.error("所有端口转发尝试均失败")
+                raise RuntimeError(f"推送 scrcpy-server 失败: {result.stderr.decode(errors='replace')}")
 
     def _start_server_process(self, server_version: str = None):
         """启动 scrcpy server 子进程（支持 2.x / 3.x / 4.x 版本自适应）。
 
-        Args:
-            server_version: 传给 server 的版本字符串，None 则使用模块级检测值
-        """
-        version = server_version or _get_scrcpy_version()
-        major = _parse_major_version(version)
-        cmd = ["adb"]
-        if self._serial:
-            cmd += ["-s", self._serial]
-        cmd += [
-            "shell",
+        forward_cmd = [
+            "adb", "-s", self._device_serial, "forward",
+            f"tcp:{self._forward_port}", f"localabstract:{_SCRCPY_SOCKET_NAME}"
+        ]
+        result = subprocess.run(
+            forward_cmd, capture_output=True, timeout=10,
+            creationflags=_SUBPROCESS_FLAGS
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"adb forward 失败: {result.stderr.decode(errors='replace')}")
+
+        server_cmd = [
+            "adb", "-s", self._device_serial, "shell",
             "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
-            "app_process",
-            "/",
-            "com.genymobile.scrcpy.Server",
-            version,
-            "log_level=warn",
-            # max_size=0 表示不缩放，frame 尺寸 == 设备真实分辨率。
-            # 此前 max_size=1280 会把 1080x2400 缩成 576x1280，导致投屏点击
-            # 坐标与设备响应位置不一致（wm size Override 与 scrcpy 采集的物理
-            # 分辨率比例不一致时，比例补偿会失准）。取消限制后 frame 与设备
-            # 1:1 对齐，坐标映射无需依赖比例补偿。
-            "max_size=0",
-            "max_fps=60",
-            "video_bit_rate=4000000",
-            "video_codec_options=latency=1,priority=0",
-            "tunnel_forward=true",
-            "control=false",
-            "audio=false",
-            "cleanup=false",
-            "send_frame_meta=False",
+            "app_process", "/", "com.genymobile.scrcpy.Server",
+            opts.server_version, "log_level=info",
+            f"video_codec={opts.video_codec}",
+            f"video_bit_rate={opts.bit_rate}",
+            f"max_size={opts.max_size}",
+            f"max_fps={opts.max_fps}",
+            "tunnel_forward=true", "control=false", "cleanup=true", "audio=false"
         ]
         logger.info("启动 scrcpy server (version=%s, major=%d)", version, major)
         try:
@@ -611,36 +392,26 @@ class ScrcpyCapture(QObject):
             logger.error("启动 scrcpy server 失败: %s", e)
             self._server_process = None
 
-    def _connect_socket(self) -> Optional[socket.socket]:
-        """连接到 scrcpy socket（带超时重试）。"""
-        deadline = time.monotonic() + _SCRCPY_CONNECT_TIMEOUT
-        attempt = 0
-        while time.monotonic() < deadline:
-            if not self._running:
-                return None
-            attempt += 1
+        time.sleep(opts.startup_wait)
+
+        if self._server_process.poll() is not None:
+            stderr_output = self._server_process.stderr.read().decode(errors="replace")
+            raise RuntimeError(f"scrcpy 服务启动失败: {stderr_output}")
+
+        connected = False
+        for socket_attempt in range(_SOCKET_CONNECT_RETRIES):
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # 增大接收缓冲区，减少丢包和拷贝次数
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 0x400000)
-                # 禁用 Nagle 算法，小包立即发送
-                # scrcpy 帧头可能被 Nagle 缓存 ~20ms，禁用后降低传输延迟
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                sock.settimeout(_SCRCPY_SOCKET_TIMEOUT)
-                sock.connect(("127.0.0.1", self._local_port))
-                # 握手阶段保持超时保护，防止 server 不响应时无限阻塞
-                sock.settimeout(_SCRCPY_SOCKET_TIMEOUT)
-                logger.info("scrcpy socket 连接成功 (第 %d 次尝试): 127.0.0.1:%d",
-                            attempt, self._local_port)
-                return sock
-            except (ConnectionRefusedError, OSError):
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-                time.sleep(_SCRCPY_CONNECT_RETRY_INTERVAL)
-        logger.error("scrcpy socket 连接超时 (%d 次尝试)", attempt)
-        return None
+                self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+                self._socket.settimeout(5)
+                self._socket.connect(("127.0.0.1", self._forward_port))
+                self._socket.settimeout(2)
+                connected = True
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                if socket_attempt == _SOCKET_CONNECT_RETRIES - 1:
+                    raise RuntimeError(f"鏃犳硶杩炴帴鍒皊crcpy socket: {e}")
+                time.sleep(_SOCKET_CONNECT_INTERVAL)
 
     def _read_exact(self, sock: socket.socket, n: int) -> Optional[bytes]:
         """从 socket 精确读取 n 字节。
@@ -755,32 +526,362 @@ class ScrcpyCapture(QObject):
 
             logger.info("scrcpy 2.x 协议: 设备=%s, 分辨率=%dx%d", device_name, self._frame_width, self._frame_height)
 
+        self._start_decoder_pipeline()
         return True
 
-    def _validate_version_compatibility(self, client_ver: str, server_ver: str) -> bool:
-        """检测客户端与服务端版本兼容性。
+    def _start_decoder_pipeline(self):
+        """解码管线分发：优先 PyAV 进程内解码，失败回退 ffmpeg rawvideo。"""
+        if self._use_pyav:
+            try:
+                self._start_pyav_decoder()
+                return
+            except Exception as e:
+                logger.warning("PyAV 解码初始化失败，回退到 ffmpeg: %s", e)
+                self._use_pyav = False
+                self._av_codec = None
+        self._start_ffmpeg_and_threads()
 
-        Args:
-            client_ver: 客户端版本字符串
-            server_ver: 服务端版本字符串
+    def _start_pyav_decoder(self):
+        self._generation += 1
+        gen = self._generation
+        codec_name = self._cast_options.video_codec
+        try:
+            self._av_codec = _av.CodecContext.create(codec_name, "r")
+        except Exception as e:
+            raise RuntimeError(f"PyAV 创建 {codec_name} 解码器失败: {e}")
+        self._frame_w = 0
+        self._frame_h = 0
+        self._writer_thread = threading.Thread(
+            target=self._pyav_decode_loop, args=(gen,), daemon=True
+        )
+        self._writer_thread.start()
 
-        Returns:
-            是否兼容（True=兼容，False=可能存在兼容性问题）
+    def _pyav_decode_loop(self, gen: int):
+        logger.debug("PyAV 解码线程启动 [gen=%d]", gen)
+        codec = self._av_codec
+        try:
+            while not self._stopping and self._generation == gen:
+                pts_data = self._recv_exact(8)
+                if not pts_data:
+                    break
+                size_data = self._recv_exact(4)
+                if not size_data:
+                    break
+                packet_size = struct.unpack(">I", size_data)[0]
+                if packet_size == 0:
+                    continue
+                if packet_size > _MAX_PACKET_SIZE:
+                    logger.warning("异常包大小: %d, 跳过", packet_size)
+                    continue
+                h264_data = self._recv_exact(packet_size)
+                if not h264_data:
+                    break
+                try:
+                    for packet in codec.parse(h264_data):
+                        for frame in codec.decode(packet):
+                            self._handle_decoded_frame(frame, gen)
+                except Exception as e:
+                    logger.debug("PyAV 解码单包异常 [gen=%d]: %s", gen, e)
+        except Exception as e:
+            if not self._stopping:
+                logger.error("PyAV 解码线程异常 [gen=%d]: %s", gen, e)
+        finally:
+            logger.debug("PyAV 解码线程结束 [gen=%d]", gen)
+            if not self._stopping and self._generation == gen:
+                self._handle_connection_lost()
+
+    def _handle_decoded_frame(self, frame, gen: int):
+        """处理 PyAV 解码出的 VideoFrame，转 ndarray 后缓存/emit。
+
+        节流位置上移：未到 emit 间隔则跳过昂贵的 to_ndarray 转换，
+        仅首帧用于解析宽高。被跳过的帧仍正常参与 H.264 参考解码，
+        _current_frame 最多 ~_FRAME_EMIT_INTERVAL 陈旧，可接受。
         """
-        client_major = _parse_major_version(client_ver)
-        server_major = _parse_major_version(server_ver)
+        if self._frame_w == 0 and frame.width > 0:
+            self._frame_w = frame.width
+            self._frame_h = frame.height
+            logger.debug("PyAV 解析分辨率: %dx%d", self._frame_w, self._frame_h)
+        now = time.monotonic()
+        if now - self._last_emit_time < _FRAME_EMIT_INTERVAL:
+            return
+        self._last_emit_time = now
+        arr = frame.to_ndarray(format="bgr24")
+        with self._frame_lock:
+            self._current_frame = arr
+        self.frame_captured.emit(arr)
 
-        if abs(client_major - server_major) > 1:
-            logger.warning(
-                "scrcpy 版本差距过大: client=%s (major=%d), server=%s (major=%d)，可能出现兼容性问题",
-                client_ver, client_major, server_ver, server_major,
+    def _remote_jar_matches_local(self) -> bool:
+        """校验远端 scrcpy-server.jar 大小与本地一致，用于跳过重复 push。"""
+        try:
+            local_size = os.path.getsize(self._server_jar_path)
+        except OSError:
+            return False
+        try:
+            result = subprocess.run(
+                ["adb", "-s", self._device_serial, "shell",
+                 "ls", "-s", "/data/local/tmp/scrcpy-server.jar"],
+                capture_output=True, timeout=5,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        if result.returncode != 0:
+            return False
+        out = result.stdout.decode(errors="replace").strip()
+        parts = out.split()
+        if not parts:
+            return False
+        try:
+            remote_size = int(parts[0])
+        except ValueError:
+            return False
+        return remote_size == local_size and local_size > 0
+
+    def _probe_codec_supported(self, codec: str) -> bool:
+        """探测设备是否支持指定 video codec 的硬件编码。
+
+        通过 scrcpy server 的 list_encoders 能力（server >= 2.0）查询；
+        不可用时降级为基于 Android API level 的保守判断。
+        """
+        if codec == "h264":
+            return True
+        try:
+            result = subprocess.run(
+                ["adb", "-s", self._device_serial, "shell",
+                 "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
+                 "app_process", "/", "com.genymobile.scrcpy.Server",
+                 self._cast_options.server_version, "log_level=warn",
+                 "list_encoders=true"],
+                capture_output=True, timeout=8,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+            text = (result.stdout + result.stderr).decode(errors="replace")
+            return codec in text
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    def _start_ffmpeg_and_threads(self):
+        self._generation += 1
+        gen = self._generation
+
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-probesize", "32",
+            "-analyzeduration", "0",
+            "-f", "h264",
+            "-i", "pipe:0",
+            "-f", "rawvideo",
+            "-pix_fmt", "bgr0",
+            "pipe:1"
+        ]
+
+        try:
+            self._ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+                creationflags=_SUBPROCESS_FLAGS
             )
             return False
         return True
 
-    def _log_server_stderr(self):
-        """读取并记录 scrcpy server 进程的 stderr 输出，用于诊断。"""
-        if self._server_process is None:
+        self._frame_w, self._frame_h = 0, 0
+
+        self._writer_thread = threading.Thread(
+            target=self._socket_to_ffmpeg, args=(gen,), daemon=True
+        )
+        self._writer_thread.start()
+
+        self._frame_w, self._frame_h = self._probe_frame_size(gen, timeout=6.0)
+        if self._frame_w == 0 or self._frame_h == 0:
+            raise RuntimeError("无法解析视频宽高")
+
+        self._decoder_thread = threading.Thread(
+            target=self._decode_ffmpeg_output, args=(gen,), daemon=True
+        )
+        self._decoder_thread.start()
+
+    def _recv_exact(self, length: int) -> Optional[bytes]:
+        if self._socket is None:
+            return None
+        data = b""
+        while len(data) < length:
+            try:
+                chunk = self._socket.recv(length - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            except socket.timeout:
+                if self._stopping:
+                    return None
+                continue
+            except (ConnectionError, OSError):
+                return None
+        return data
+
+    def _probe_frame_size(self, gen: int, timeout: float = 4.0) -> tuple:
+        import re
+        import select
+        pattern = re.compile(rb',\s*(\d+)x(\d+)[\s,]')
+        deadline = time.monotonic() + timeout
+        stderr = self._ffmpeg_process.stderr if self._ffmpeg_process else None
+        if stderr is None:
+            return 0, 0
+        fd = stderr.fileno()
+        collected = b""
+        while time.monotonic() < deadline:
+            if self._stopping or self._generation != gen:
+                break
+            if self._ffmpeg_process.poll() is not None:
+                break
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if not ready:
+                continue
+            try:
+                chunk = stderr.read(4096)
+            except (BlockingIOError, OSError):
+                time.sleep(0.02)
+                continue
+            if chunk:
+                collected += chunk
+                m = pattern.search(collected)
+                if m:
+                    return int(m.group(1)), int(m.group(2))
+            else:
+                time.sleep(0.02)
+        logger.warning("ffmpeg 未能解析分辨率，stderr 片段: %r", collected[-512:])
+        return 0, 0
+
+    def _socket_to_ffmpeg(self, gen: int):
+        logger.debug("socket璇诲彇绾跨▼鍚姩 [gen=%d]", gen)
+        try:
+            while not self._stopping and self._generation == gen:
+                pts_data = self._recv_exact(8)
+                if not pts_data:
+                    break
+
+                size_data = self._recv_exact(4)
+                if not size_data:
+                    break
+
+                packet_size = struct.unpack(">I", size_data)[0]
+                if packet_size == 0:
+                    continue
+
+                if packet_size > _MAX_PACKET_SIZE:
+                    logger.warning("寮傚父鍖呭ぇ灏? %d, 璺宠繃", packet_size)
+                    continue
+
+                h264_data = self._recv_exact(packet_size)
+                if not h264_data:
+                    break
+
+                if self._ffmpeg_process and self._ffmpeg_process.stdin:
+                    try:
+                        self._ffmpeg_process.stdin.write(h264_data)
+                        self._ffmpeg_process.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        break
+        except Exception as e:
+            if not self._stopping:
+                logger.error("socket璇诲彇绾跨▼寮傚父 [gen=%d]: %s", gen, e)
+        finally:
+            logger.debug("socket璇诲彇绾跨▼缁撴潫 [gen=%d]", gen)
+            if self._ffmpeg_process and self._ffmpeg_process.stdin:
+                try:
+                    self._ffmpeg_process.stdin.close()
+                except Exception:
+                    pass
+            if not self._stopping and self._generation == gen:
+                self._handle_connection_lost()
+
+    def _decode_ffmpeg_output(self, gen: int):
+        logger.debug("帧解码线程启动 [gen=%d]", gen)
+        w = self._frame_w
+        h = self._frame_h
+        frame_size = w * h * 4
+        buf = bytearray()
+
+        try:
+            while not self._stopping and self._generation == gen and self._ffmpeg_process:
+                try:
+                    data = self._ffmpeg_process.stdout.read(1 << 20)
+                    if not data:
+                        break
+                    buf += data
+                except Exception:
+                    break
+
+                while len(buf) >= frame_size:
+                    now = time.monotonic()
+                    if now - self._last_emit_time < _FRAME_EMIT_INTERVAL:
+                        # 命中节流：只消费缓冲（避免堆积），跳过拷贝与 numpy 构造
+                        del buf[:frame_size]
+                        continue
+                    self._last_emit_time = now
+                    raw = bytes(buf[:frame_size])
+                    del buf[:frame_size]
+                    frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 4)
+                    frame = frame[:, :, :3]
+                    with self._frame_lock:
+                        self._current_frame = frame
+                    self.frame_captured.emit(frame)
+        except Exception as e:
+            if not self._stopping:
+                logger.error("帧解码线程异常 [gen=%d]: %s", gen, e)
+        finally:
+            logger.debug("帧解码线程结束 [gen=%d]", gen)
+
+    def _start_fallback_reader(self):
+        self._fallback_thread = threading.Thread(target=self._fallback_loop, daemon=True)
+        self._fallback_thread.start()
+
+    def _fallback_loop(self):
+        logger.info("screencap鍥為€€妯″紡鍚姩")
+        while not self._stopping:
+            try:
+                frame = self._screencap_single()
+                if frame is not None:
+                    with self._frame_lock:
+                        self._current_frame = frame
+                    now = time.monotonic()
+                    if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
+                        self._last_emit_time = now
+                        self.frame_captured.emit(frame)
+                time.sleep(_FALLBACK_INTERVAL)
+            except Exception as e:
+                logger.error("screencap鍥為€€妯″紡鍑洪敊: %s", e)
+                if not self._stopping:
+                    self._connected = False
+                    self.connection_lost.emit()
+                    time.sleep(1)
+                    self._connected = True
+        logger.info("screencap鍥為€€妯″紡缁撴潫")
+
+    def _screencap_single(self) -> Optional[np.ndarray]:
+        try:
+            proc = subprocess.Popen(
+                ["adb", "-s", self._device_serial, "exec-out", "screencap", "-p"],
+                stdout=subprocess.PIPE,
+                creationflags=_SUBPROCESS_FLAGS
+            )
+            data, _ = proc.communicate(timeout=10)
+            if proc.returncode != 0 or not data:
+                return None
+            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            return frame
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            return None
+        except Exception as e:
+            logger.error("screencap澶辫触: %s", e)
+            return None
+
+    def _handle_connection_lost(self):
+        if self._stopping:
             return
         try:
             # 如果 server 已退出，直接读取全部 stderr
@@ -1048,9 +1149,10 @@ class ScrcpyCapture(QObject):
     #  Screencap 回退模式
     # ===================================================================
 
-    def _screencap_loop(self):
-        """screencap 回退：周期性截屏获取帧。"""
-        logger.info("screencap 回退模式启动 (间隔 %.1fs)", _SCREENCAP_INTERVAL)
+            self._writer_thread = None
+            self._decoder_thread = None
+            self._fallback_thread = None
+            self._av_codec = None
 
         while self._running:
             frame = self._capture_screencap()

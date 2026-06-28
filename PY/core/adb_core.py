@@ -292,23 +292,23 @@ class AdbCore:
             logger.error("推送scrcpy-server失败")
             raise
 
-        cmd_parts = ["adb"]
-        if serial:
-            cmd_parts.extend(["-s", serial])
-        cmd_parts.extend([
-            "shell",
-            "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
-            "app_process",
-            "/",
-            "com.genymobile.scrcpy.Server",
-            "2.0",
-            "log_level=info",
-            "max_size=1920",
-            "max_fps=60",
-            "tunnel_forward=true",
-            "control=false",
-            "cleanup=true"
-        ])
+            cmd_parts = ["adb"]
+            if serial:
+                cmd_parts.extend(["-s", serial])
+            cmd_parts.extend([
+                "shell",
+                "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
+                "app_process",
+                "/",
+                "com.genymobile.scrcpy.Server",
+                "1.25",
+                "log_level=info",
+                "max_size=1920",
+                "max_fps=30",
+                "tunnel_forward=true",
+                "control=false",
+                "cleanup=true"
+            ])
 
         logger.debug("启动scrcpy服务: %s", " ".join(cmd_parts))
         try:
