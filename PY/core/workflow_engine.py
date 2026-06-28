@@ -38,6 +38,13 @@ class _WorkflowWorker(QObject):
         self._current_price: int = 0
         self._mail_count: int = 0
         self._cycle_count: int = 0
+        self._template_cache: dict = {}
+
+    def request_reset_mail_count(self) -> None:
+        """线程安全地重置邮件计数（由 WorkflowEngine 调用）。"""
+        self._mail_count = 0
+        self._save_mail_count()
+        self.mail_count_updated.emit(0)
 
     def run(self) -> None:
         self._stop_requested = False
@@ -135,19 +142,23 @@ class _WorkflowWorker(QObject):
         return True
 
     def _get_current_frame(self) -> Optional[np.ndarray]:
-        screen_capture = self._step_executor._screen_capture
-        if screen_capture is None:
-            return None
-        return screen_capture.get_current_frame()
+        return self._step_executor.get_current_frame()
 
     def _check_template(self, frame: np.ndarray, template_name: str,
                         threshold: float = 0.85) -> bool:
         template_dir = self._config_manager.get_config("recognition.template_dir", "tp")
         template_path = os.path.join(template_dir, template_name)
-        template = cv2.imread(template_path, cv2.IMREAD_COLOR)
-        if template is None:
-            logger.error("加载模板图片失败: %s", template_path)
-            return False
+
+        # 模板缓存：避免循环中重复读取磁盘
+        cache_key = template_path
+        if cache_key not in self._template_cache:
+            template = cv2.imread(template_path, cv2.IMREAD_COLOR)
+            if template is None:
+                logger.error("加载模板图片失败: %s", template_path)
+                return False
+            self._template_cache[cache_key] = template
+        template = self._template_cache[cache_key]
+
         if template.shape[0] > frame.shape[0] or template.shape[1] > frame.shape[1]:
             return False
         result = cv2.matchTemplate(frame, template, cv2.TM_CCOEFF_NORMED)
@@ -434,8 +445,7 @@ class WorkflowEngine(QObject):
     def reset_mail_count(self) -> None:
         self._mail_count = 0
         if self._worker is not None:
-            self._worker._mail_count = 0
-            self._worker._save_mail_count()
+            self._worker.request_reset_mail_count()
         else:
             mail_count_file = self._config_manager.get_config("mail_params.mail_count_file", "you.txt")
             try:

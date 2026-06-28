@@ -1,4 +1,4 @@
-﻿"""Unified error handling and recovery policy for step execution.
+"""Unified error handling and recovery policy for step execution.
 
 Policies:
   retry       - retry with linear delay
@@ -79,6 +79,8 @@ class ErrorPolicyConfig:
                 pass
         if category in self.category_overrides:
             return self.category_overrides[category]
+        if self.default_policy != ErrorPolicy.FAIL:
+            return self.default_policy
         if category in DEFAULT_POLICY_MAP:
             return DEFAULT_POLICY_MAP[category]
         return self.default_policy

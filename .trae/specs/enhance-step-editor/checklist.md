@@ -1,0 +1,24 @@
+- [x] STEP_TYPE_FIELDS 配置表定义了全部 21 种步骤类型的字段、控件类型和默认值
+- [x] 编辑器三区布局正确渲染：基础信息区（display_name + enabled）、类型专属参数区、高级选项折叠区
+- [x] 按类型定制表单：每种步骤类型仅显示其相关字段，不显示无关字段
+- [x] 字段不存在时使用默认值创建控件，而非隐藏
+- [x] 必填字段标签带红色星号标记
+- [x] on_fail 使用 QComboBox 下拉框，7 个选项正确
+- [x] region 使用 4 个 QSpinBox 编辑，替代 JSON 字符串
+- [x] var_type 使用 QComboBox 下拉框，3 个选项正确
+- [x] workflow 使用 QComboBox 从已有工作流列表选择，可编辑
+- [x] keyevent 的 key 使用 QComboBox 预置常用按键码，可编辑
+- [x] wifi 的 action 使用 QComboBox，enable/disable 选项正确
+- [x] threshold 使用 QDoubleSpinBox，范围 0.0~1.0，步长 0.05，默认 0.85
+- [x] 坐标获取按钮对 tap/long_press/tap_point/swipe 类型可见
+- [x] swipe 类型支持两次点击模式选取起止坐标
+- [x] 步骤列表有 display_name 时优先显示，类型中文名以括号附加
+- [x] 步骤列表 on_fail 非默认值时显示策略标记（重试/跳过/中止等）
+- [x] 步骤列表有 retry_count 时显示"×N"
+- [x] 禁用步骤左侧颜色条变灰，整行文字半透明
+- [x] condition 类型摘要显示 then_steps/else_steps 步骤数量
+- [x] loop 类型摘要显示 steps 步骤数量
+- [x] 右键菜单包含"重置执行结果"选项，功能正常
+- [x] 编辑 display_name/on_fail/retry_count/enabled 后列表实时更新
+- [x] 新增字段能正确保存到 workflows.json
+- [x] 21 种步骤类型编辑器逐一验证表单渲染正确

@@ -1,0 +1,5 @@
+- [x] `_detect_server_jar_version()` 能从 classes.dex 中提取版本号（当 MANIFEST.MF 和资源文件方式失败时）
+- [x] JAR 版本检测全部失败时，日志级别为 WARNING 并提示版本可能不匹配
+- [x] dummy byte 读取失败时，server stderr 被记录到日志中
+- [x] `_setup_adb_forward()` 在设置新转发前先清理旧转发
+- [x] 进入 screencap 回退模式时，日志包含低帧率提示信息

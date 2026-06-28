@@ -34,6 +34,14 @@ QListWidget::item:hover:!selected {
     background-color: #21262d;
 }
 
+/* Step list widget — override global item padding for custom item widgets */
+QListWidget#stepListWidget::item {
+    padding: 0px;
+}
+QListWidget#stepListWidget::item:selected {
+    background-color: #1f6feb;
+}
+
 QPushButton {
     background-color: #21262d;
     border: 1px solid #30363d;
@@ -114,6 +122,39 @@ QPushButton[class="danger"]:disabled {
     background-color: #6e1a19;
     color: #484f58;
     border: 1px solid #6e1a19;
+}
+
+/* 工具栏图标按钮 — 紧凑尺寸
+   Qt QSS box model = content-box:
+   实际宽度 = content + padding*2 + border*2
+   目标总尺寸 28×26 → content = 28-4-2 = 22, 26-4-2 = 20 */
+QPushButton[role="toolbar-icon"] {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 2px;
+    font-size: 16px;
+}
+
+QPushButton[role="toolbar-icon"]:pressed {
+    padding-top: 3px;
+    padding-left: 3px;
+}
+
+QPushButton[role="toolbar-icon"][class="primary"],
+QPushButton[role="toolbar-icon"][class="danger"] {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 2px;
+}
+
+QPushButton[role="toolbar-icon"][class="primary"]:pressed,
+QPushButton[role="toolbar-icon"][class="danger"]:pressed {
+    padding-top: 3px;
+    padding-left: 3px;
 }
 
 QLineEdit {
@@ -671,3 +712,115 @@ QPlainTextEdit {
     font-size: 12px;
 }
 
+/* ===== Config Panel ===== */
+QLabel#navHeader {
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+    color: #e6edf3;
+}
+
+QLineEdit#configSearch {
+    margin: 8px;
+    padding: 6px 10px;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    background-color: #0d1117;
+}
+
+QLineEdit#configSearch:focus {
+    border: 2px solid #1f6feb;
+    padding: 5px 9px;
+}
+
+QListWidget#configNavList {
+    background-color: #0d1117;
+    border: none;
+    border-right: 1px solid #30363d;
+    outline: none;
+    padding: 4px 0px;
+}
+
+QListWidget#configNavList::item {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #8b949e;
+    border: none;
+}
+
+QListWidget#configNavList::item:selected {
+    background-color: #1f6feb;
+    color: #ffffff;
+    border-left: 3px solid #58a6ff;
+}
+
+QListWidget#configNavList::item:hover:!selected {
+    background-color: #21262d;
+    color: #e6edf3;
+}
+
+QLabel#configContentTitle {
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+    color: #58a6ff;
+}
+
+/* ===== Floating Widget ===== */
+QPushButton#floatBtnPause {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #d29922;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+QPushButton#floatBtnPause:hover {
+    background-color: #30363d;
+    border-color: #d29922;
+}
+
+QPushButton#floatBtnStop {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #da3633;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+QPushButton#floatBtnStop:hover {
+    background-color: #30363d;
+    border-color: #da3633;
+}
+
+/* ===== Step Type Card ===== */
+QFrame#stepTypeCard {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+}
+
+/* ===== Toast Notification ===== */
+QWidget#toastNotification {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+
+/* ===== Button Click Feedback ===== */
+QPushButton:pressed {
+    padding-top: 7px;
+    padding-left: 15px;
+}
+
+/* ===== Status Bar Shortcut Hint ===== */
+QStatusBar QLabel {
+    padding: 0px 8px;
+}
+
+/* ===== Empty State Action Button ===== */
+QPushButton#emptyStateAction {
+    min-width: 140px;
+    padding: 8px 20px;
+    font-size: 13px;
+}

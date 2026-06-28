@@ -10,6 +10,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from core.config_manager import ConfigManager
+from ui.dialogs.merge_workflows_dialog import MergeWorkflowsDialog
 
 # 预设方案模板
 PRESET_WORKFLOWS = {
@@ -18,7 +19,7 @@ PRESET_WORKFLOWS = {
         "description": "标准购买流程",
         "device_resolution": {"width": 2400, "height": 1080},
         "steps": [
-            {"type": "launch", "package": "com.tencent.tmgp.dfm", "comment": "启动游戏", "wait_after": 5000},
+            {"type": "launch", "package": "com.tencent.tmgp.dfm", "wait_after": 5000, "comment": "启动游戏"},
             {"type": "wait", "seconds": 3, "comment": "等待加载"},
         ],
     },
@@ -26,11 +27,12 @@ PRESET_WORKFLOWS = {
 
 
 class WorkflowManagerDialog(QDialog):
-    """方案管理弹窗：新建（含预设）、删除、重命名、导入、导出。"""
+    """方案管理弹窗：新建（含预设）、删除、重命名、导入、导出、整合。"""
 
-    def __init__(self, config_manager: ConfigManager, parent=None):
+    def __init__(self, config_manager: ConfigManager, current_workflow: str = "", parent=None):
         super().__init__(parent)
         self._config_manager = config_manager
+        self._current_workflow = current_workflow
         self.setWindowTitle("方案管理")
         self.setMinimumSize(500, 400)
         self._init_ui()
@@ -69,6 +71,11 @@ class WorkflowManagerDialog(QDialog):
         btn_export = QPushButton("导出")
         btn_export.clicked.connect(self._on_export)
         btn_row.addWidget(btn_export)
+
+        btn_merge = QPushButton("整合成大方案")
+        btn_merge.setToolTip("把多个方案按顺序合并成一个新方案")
+        btn_merge.clicked.connect(self._on_merge)
+        btn_row.addWidget(btn_merge)
 
         layout.addLayout(btn_row)
 
@@ -179,3 +186,14 @@ class WorkflowManagerDialog(QDialog):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             QMessageBox.warning(self, "导出失败", str(e))
+
+    def _on_merge(self):
+        dialog = MergeWorkflowsDialog(self._config_manager, self._current_workflow, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        merged_name = dialog.get_merged_name()
+        self._refresh_list()
+        if merged_name:
+            items = self._list.findItems(merged_name, Qt.MatchExactly)
+            if items:
+                self._list.setCurrentItem(items[0])
