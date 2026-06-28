@@ -208,7 +208,7 @@ ADVANCED_FIELDS = {
 
 # Field labels
 FIELD_LABELS = {
-    "enabled": "鍚敤",
+    "enabled": "启用",
     "display_name": "显示名称",
     "x": "X坐标",
     "y": "Y坐标",
@@ -218,7 +218,7 @@ FIELD_LABELS = {
     "y2": "终点Y",
     "duration": "时长(ms)",
     "comment": "备注",
-    "wait_after": "等待后(ms)",
+    "wait_after": "等待(秒)",
     "key": "按键",
     "seconds": "秒数",
     "action": "动作",

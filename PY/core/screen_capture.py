@@ -12,12 +12,13 @@ import re
 import select
 import socket
 import struct
-import subprocess
-import sys
-import threading
+import logging
+import re
 import time
+import os
+import sys
 import zipfile
-from typing import Optional
+from typing import Optional, Tuple
 
 import av
 import cv2
@@ -26,12 +27,7 @@ from av.codec import CodecContext
 from av.error import InvalidDataError
 from PyQt5.QtCore import QObject, pyqtSignal
 
-try:
-    import av as _av
-    _HAS_PYAV = True
-except ImportError:
-    _av = None
-    _HAS_PYAV = False
+from core.scrcpy_control import ScrcpyControl, ACTION_DOWN, ACTION_MOVE, ACTION_UP
 
 
 logger = logging.getLogger(__name__)
@@ -215,6 +211,27 @@ class CastOptions:
         self.startup_wait = float(startup_wait)
         self.skip_push_if_exists = bool(skip_push_if_exists)
 
+# 延迟优化参数（不降画质）
+# bit_rate 提到 6Mbps（1080p 高画质）；关键帧间隔 10，加快重连首帧
+_SCRCPY_BIT_RATE = 6000000
+_SCRCPY_MAX_SIZE = 1080
+_SCRCPY_I_FRAME_INTERVAL = 10
+# rawvideo 显示通道：省掉 mjpeg 编码+JPEG 解码两步，延迟 -10~25ms
+_USE_RAWVIDEO = True
+# stderr 解析视频分辨率的超时（秒）
+_VIDEO_SIZE_DETECT_TIMEOUT = 8.0
+# ffmpeg stderr 中分辨率正则（匹配形如 1080x486 / 1920x1080）
+_RESOLUTION_RE = re.compile(rb"(\d{2,5})x(\d{2,5})")
+
+# 触摸 tap 判定阈值（视频流坐标系像素，press≈release 视为 tap）
+_TOUCH_TAP_THRESHOLD = 10
+
+# 已知 scrcpy server 版本（从 jar 自动检测失败时的回退值）
+# 当前仓库 lib/scrcpy-server.jar 实测为 3.3.4
+_SCRCPY_FALLBACK_VERSION = "3.3.4"
+# 版本号正则：匹配 X.Y.Z 格式（如 3.3.4、2.7.1）
+_VERSION_RE = re.compile(rb"(\d{1,2}\.\d{1,2}\.\d{1,3})")
+
 
 class ScrcpyCapture(QObject):
     """双模式屏幕采集：scrcpy 高速 + screencap 回退。
@@ -258,13 +275,23 @@ class ScrcpyCapture(QObject):
         self._use_pyav: bool = _HAS_PYAV
         self._av_codec = None
 
-    def start(
-        self,
-        device_serial: str,
-        server_jar_path: str,
-        max_retries: int = 3,
-        cast_options: Optional[CastOptions] = None,
-    ) -> bool:
+        # 控制协议注入（低延迟）与降级路径
+        self._adb_core = None  # 降级 adb input 注入用
+        self._control: Optional[ScrcpyControl] = None
+        self._video_size: Tuple[int, int] = (0, 0)  # 当前视频帧尺寸（视频流坐标系）
+        self._base_resolution: Tuple[int, int] = (2400, 1080)  # 设备物理分辨率（降级坐标转换用）
+
+        # 触摸手势状态（adb 降级模式下记录按下起点，release 时整体注入）
+        self._touch_start: Tuple[int, int] = (-1, -1)
+        self._touch_start_time: float = 0.0
+
+        # rawvideo 解析分辨率相关
+        self._frame_w: int = 0
+        self._frame_h: int = 0
+        self._size_event = threading.Event()
+        self._stderr_thread: Optional[threading.Thread] = None
+
+    def start(self, device_serial: str, server_jar_path: str, max_retries: int = 3, adb_core=None) -> bool:
         if self._connected:
             self.stop()
 
@@ -272,14 +299,7 @@ class ScrcpyCapture(QObject):
         self._server_jar_path = server_jar_path
         self._stopping = False
         self._max_reconnect = max_retries
-        self._cast_options = cast_options or CastOptions()
-        if self._cast_options.video_codec != "h264":
-            if not self._probe_codec_supported(self._cast_options.video_codec):
-                logger.warning(
-                    "设备不支持 video_codec=%s，回退到 h264",
-                    self._cast_options.video_codec,
-                )
-                self._cast_options.video_codec = "h264"
+        self._adb_core = adb_core  # 降级注入路径用
 
         for attempt in range(1, max_retries + 1):
             logger.info("尝试启动scrcpy连接 (%d/%d): %s", attempt, max_retries, device_serial)
@@ -288,7 +308,9 @@ class ScrcpyCapture(QObject):
                     self._connected = True
                     if self._reconnect_count > 0:
                         self.connection_restored.emit()
-                    logger.info("scrcpy连接成功: %s", device_serial)
+                    logger.info("scrcpy杩炴帴鎴愬姛: %s", device_serial)
+                    # 异步建立 control socket（失败仅降级注入，不影响投屏）
+                    self._start_control_channel()
                     return True
             except Exception as e:
                 logger.error("scrcpy连接失败 (%d/%d): %s", attempt, max_retries, e)
@@ -321,6 +343,164 @@ class ScrcpyCapture(QObject):
         with self._lock:
             return self._frame_version
 
+    def set_base_resolution(self, width: int, height: int) -> None:
+        """设置设备物理分辨率，用于降级 adb input 时的坐标转换。"""
+        self._base_resolution = (int(width), int(height))
+
+    def get_video_size(self) -> Tuple[int, int]:
+        """返回当前视频帧尺寸（视频流坐标系，受 max_size 缩放）。"""
+        return self._video_size
+
+    def is_control_available(self) -> bool:
+        """scrcpy 控制通道是否可用（低延迟注入）。"""
+        return self._control is not None and self._control.is_available()
+
+    def inject_tap(self, x: int, y: int) -> bool:
+        """注入一次点击。x,y 为 **视频流坐标系** 坐标。
+
+        优先 scrcpy 控制协议（~10ms）；不可用则降级 adb input（~100ms），
+        降级时自动把视频流坐标转换为设备物理坐标。
+        """
+        if self._control is not None and self._control.is_available():
+            return self._control.inject_tap(x, y)
+        return self._inject_tap_via_adb(x, y)
+
+    def inject_swipe(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.3) -> bool:
+        """注入一次滑动。坐标为 **视频流坐标系**，duration 单位秒。
+
+        优先 scrcpy 控制协议；不可用则降级 adb input（duration 转毫秒）。
+        """
+        if self._control is not None and self._control.is_available():
+            return self._control.inject_swipe(x1, y1, x2, y2, duration)
+        return self._inject_swipe_via_adb(x1, y1, x2, y2, duration)
+
+    def begin_touch(self, vx: int, vy: int) -> bool:
+        """开始触摸（按下）。视频流坐标。
+
+        control 模式：立即注入 DOWN，手指实时跟随。
+        adb 降级模式：仅记录起点，待 end_touch 时整体注入。
+        """
+        self._touch_start = (vx, vy)
+        self._touch_start_time = time.monotonic()
+        if self.is_control_available():
+            return self._control.inject_touch_event(ACTION_DOWN, vx, vy)
+        return True
+
+    def move_touch(self, vx: int, vy: int) -> bool:
+        """触摸移动。视频流坐标。
+
+        control 模式：立即注入 MOVE（实时跟随）；adb 降级模式忽略中间移动。
+        """
+        if self.is_control_available():
+            return self._control.inject_touch_event(ACTION_MOVE, vx, vy)
+        return True
+
+    def end_touch(self, vx: int, vy: int) -> bool:
+        """结束触摸（抬起）。视频流坐标。
+
+        control 模式：立即注入 UP。
+        adb 降级模式：根据起点/终点位移判定 tap 或 swipe，整体注入。
+        """
+        sx, sy = self._touch_start
+        duration = max(time.monotonic() - self._touch_start_time, 0.0)
+        self._touch_start = (-1, -1)
+
+        if self.is_control_available():
+            return self._control.inject_touch_event(ACTION_UP, vx, vy)
+
+        # adb 降级：整体注入
+        if self._adb_core is None:
+            return False
+        dist = ((vx - sx) ** 2 + (vy - sy) ** 2) ** 0.5
+        if dist < _TOUCH_TAP_THRESHOLD:
+            dx, dy = self._video_to_device(vx, vy)
+            return self._adb_core.tap(dx, dy)
+        return self._inject_swipe_via_adb(sx, sy, vx, vy, max(duration, 0.05))
+
+    def _inject_tap_via_adb(self, vx: int, vy: int) -> bool:
+        if self._adb_core is None:
+            logger.debug("adb 注入跳过：adb_core 未设置")
+            return False
+        dx, dy = self._video_to_device(vx, vy)
+        return self._adb_core.tap(dx, dy)
+
+    def _inject_swipe_via_adb(self, vx1: int, vy1: int, vx2: int, vy2: int, duration: float) -> bool:
+        if self._adb_core is None:
+            logger.debug("adb 注入跳过：adb_core 未设置")
+            return False
+        dx1, dy1 = self._video_to_device(vx1, vy1)
+        dx2, dy2 = self._video_to_device(vx2, vy2)
+        # adb swipe duration 单位毫秒
+        return self._adb_core.swipe(dx1, dy1, dx2, dy2, duration * 1000)
+
+    def _video_to_device(self, vx: int, vy: int) -> Tuple[int, int]:
+        """视频流坐标 → 设备物理坐标（基于当前视频尺寸与 base_resolution）。"""
+        vw, vh = self._video_size
+        bw, bh = self._base_resolution
+        if vw == 0 or vh == 0:
+            return int(vx), int(vy)
+        dx = int(vx * bw / vw)
+        dy = int(vy * bh / vh)
+        # 限制到设备屏幕范围
+        dx = max(0, min(dx, bw - 1))
+        dy = max(0, min(dy, bh - 1))
+        return dx, dy
+
+    def _start_control_channel(self) -> None:
+        """异步建立 scrcpy control socket（失败仅降级注入，不影响投屏）。"""
+        if self._control is not None:
+            self._control.close()
+        self._control = ScrcpyControl(self._forward_port)
+        # 若已解析到视频尺寸，先同步给 control
+        if self._video_size != (0, 0):
+            self._control.set_video_size(*self._video_size)
+
+        def _worker():
+            try:
+                self._control.connect()
+            except Exception as e:
+                logger.warning("control 通道建立异常: %s", e)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+    @staticmethod
+    def _detect_server_version(jar_path: str) -> str:
+        """从 scrcpy-server.jar 的 classes.dex 中提取 VERSION_NAME。
+
+        scrcpy server 启动时会校验客户端传入的版本号，不匹配则拒绝启动。
+        硬编码版本号在升级 jar 后会失效，因此运行时从 jar 自动检测。
+
+        检测逻辑：扫描 classes.dex 中的 ASCII 字符串，匹配 X.Y.Z 格式，
+        取第一个出现的版本号（BuildConfig.VERSION_NAME 通常排在最前面）。
+        失败时回退到 _SCRCPY_FALLBACK_VERSION。
+        """
+        try:
+            with zipfile.ZipFile(jar_path) as zf:
+                # 优先读 classes.dex（主 dex）
+                dex_name = "classes.dex"
+                if dex_name not in zf.namelist():
+                    # 找第一个 classes*.dex
+                    dex_files = [n for n in zf.namelist() if n.startswith("classes") and n.endswith(".dex")]
+                    if not dex_files:
+                        logger.warning("jar 中未找到 dex 文件，使用回退版本: %s", _SCRCPY_FALLBACK_VERSION)
+                        return _SCRCPY_FALLBACK_VERSION
+                    dex_name = dex_files[0]
+                dex_data = zf.read(dex_name)
+
+            matches = _VERSION_RE.findall(dex_data)
+            if not matches:
+                logger.warning("dex 中未检测到版本号，使用回退版本: %s", _SCRCPY_FALLBACK_VERSION)
+                return _SCRCPY_FALLBACK_VERSION
+
+            # 取第一个匹配（scrcpy VERSION_NAME 在 dex 中排在 gradle 版本之前）
+            version = matches[0].decode("ascii")
+            logger.info("检测到 scrcpy server 版本: %s (from %s)", version, jar_path)
+            return version
+        except Exception as e:
+            logger.warning("检测 scrcpy server 版本失败，使用回退版本 %s: %s", _SCRCPY_FALLBACK_VERSION, e)
+            return _SCRCPY_FALLBACK_VERSION
+
     def _start_scrcpy(self) -> bool:
         push_cmd = [
             "adb", "-s", self._device_serial, "push",
@@ -347,16 +527,17 @@ class ScrcpyCapture(QObject):
         if result.returncode != 0:
             raise RuntimeError(f"adb forward失败: {result.stderr.decode(errors='replace')}")
 
+        # 运行时从 jar 检测版本号，避免升级 jar 后版本不匹配导致 server 拒绝启动
+        server_version = self._detect_server_version(self._server_jar_path)
+
         server_cmd = [
             "adb", "-s", self._device_serial, "shell",
             "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
             "app_process", "/", "com.genymobile.scrcpy.Server",
-            opts.server_version, "log_level=info",
-            f"video_codec={opts.video_codec}",
-            f"video_bit_rate={opts.bit_rate}",
-            f"max_size={opts.max_size}",
-            f"max_fps={opts.max_fps}",
-            "tunnel_forward=true", "control=false", "cleanup=true", "audio=false"
+            server_version, "log_level=info",
+            f"bit_rate={_SCRCPY_BIT_RATE}", f"max_size={_SCRCPY_MAX_SIZE}",
+            f"i_frame_interval={_SCRCPY_I_FRAME_INTERVAL}",
+            "tunnel_forward=true", "control=true", "cleanup=true", "audio=false"
         ]
         logger.info("启动 scrcpy server (version=%s, major=%d)", version, major)
         try:
@@ -645,28 +826,41 @@ class ScrcpyCapture(QObject):
         self._generation += 1
         gen = self._generation
 
+        # 重置 rawvideo 分辨率探测状态
+        self._frame_w = 0
+        self._frame_h = 0
+        self._size_event.clear()
+
         ffmpeg_cmd = [
             "ffmpeg",
             "-probesize", "32",
             "-analyzeduration", "0",
             "-f", "h264",
             "-i", "pipe:0",
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr0",
-            "pipe:1"
         ]
+        if _USE_RAWVIDEO:
+            # rawvideo bgr24：省掉 mjpeg 编码 + JPEG 解码两步，直接 np.frombuffer 成帧
+            ffmpeg_cmd += ["-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
+        else:
+            ffmpeg_cmd += ["-f", "mjpeg", "-q:v", "5", "pipe:1"]
 
         try:
             self._ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=(subprocess.PIPE if _USE_RAWVIDEO else subprocess.DEVNULL),
                 bufsize=0,
                 creationflags=_SUBPROCESS_FLAGS
             )
         except FileNotFoundError:
-            raise RuntimeError("ffmpeg未找到，请确认ffmpeg已安装并添加到PATH")
+            raise RuntimeError("ffmpeg鏈壘鍒帮紝璇风‘淇漟fmpeg宸插畨瑁呭苟娣诲姞鍒癙ATH")
+
+        if _USE_RAWVIDEO:
+            self._stderr_thread = threading.Thread(
+                target=self._read_ffmpeg_stderr, args=(gen,), daemon=True
+            )
+            self._stderr_thread.start()
 
         self._writer_thread = threading.Thread(
             target=self._socket_to_ffmpeg, args=(gen,), daemon=True
@@ -681,6 +875,36 @@ class ScrcpyCapture(QObject):
             target=self._decode_ffmpeg_output, args=(gen,), daemon=True
         )
         self._decoder_thread.start()
+
+    def _read_ffmpeg_stderr(self, gen: int):
+        """读取 ffmpeg stderr，解析视频流分辨率。
+
+        rawvideo 输出无元数据，必须从 stderr 获取帧尺寸才能定长读取。
+        ffmpeg 启动时会输出形如 `Stream #0:0: Video: h264 ..., 1080x486`。
+        解析到后通过 _size_event 通知解码线程，并同步给 ScrcpyControl。
+        """
+        if not self._ffmpeg_process or not self._ffmpeg_process.stderr:
+            return
+        try:
+            for line in iter(self._ffmpeg_process.stderr.readline, b""):
+                if self._stopping or self._generation != gen:
+                    return
+                # 取最后一个匹配（避免与输入流信息混淆，输出行通常在后）
+                matches = _RESOLUTION_RE.findall(line)
+                if matches:
+                    w, h = int(matches[-1][0]), int(matches[-1][1])
+                    # 过滤明显异常值
+                    if 16 <= w <= 7680 and 16 <= h <= 7680 and (w, h) != (self._frame_w, self._frame_h):
+                        self._frame_w = w
+                        self._frame_h = h
+                        self._size_event.set()
+                        logger.info("解析到视频分辨率: %dx%d", w, h)
+                        # 同步给 control（注入需校验视频尺寸）
+                        if self._control is not None:
+                            self._control.set_video_size(w, h)
+        except Exception as e:
+            if not self._stopping:
+                logger.debug("ffmpeg stderr 读取结束: %s", e)
 
     def _recv_exact(self, length: int) -> Optional[bytes]:
         if self._socket is None:
@@ -777,38 +1001,115 @@ class ScrcpyCapture(QObject):
                 self._handle_connection_lost()
 
     def _decode_ffmpeg_output(self, gen: int):
-        logger.debug("帧解码线程启动[gen=%d]", gen)
-        buf = b""
-
+        logger.debug("甯цВ鐮佺嚎绋嬪惎鍔?[gen=%d]", gen)
         try:
-            while not self._stopping and self._generation == gen and self._ffmpeg_process:
-                try:
-                    data = self._ffmpeg_process.stdout.read(1 << 20)
-                    if not data:
-                        break
-                    buf += data
-                except Exception:
-                    break
-
-                while len(buf) >= frame_size:
-                    now = time.monotonic()
-                    if now - self._last_emit_time < _FRAME_EMIT_INTERVAL:
-                        # 命中节流：只消费缓冲（避免堆积），跳过拷贝与 numpy 构造
-                        del buf[:frame_size]
-                        continue
-                    self._last_emit_time = now
-                    raw = bytes(buf[:frame_size])
-                    del buf[:frame_size]
-                    frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 4)
-                    frame = frame[:, :, :3]
-                    with self._frame_lock:
-                        self._current_frame = frame
-                    self.frame_captured.emit(frame)
+            if _USE_RAWVIDEO:
+                self._decode_rawvideo(gen)
+            else:
+                self._decode_mjpeg(gen)
         except Exception as e:
             if not self._stopping:
                 logger.error("帧解码线程异常[gen=%d]: %s", gen, e)
         finally:
             logger.debug("帧解码线程结束[gen=%d]", gen)
+
+    def _decode_rawvideo(self, gen: int):
+        """rawvideo 定长读取：每帧 w*h*3 字节，np.frombuffer + reshape 成帧。
+
+        需先从 stderr 解析出分辨率（_size_event），否则无法切帧。
+        """
+        if not self._size_event.wait(timeout=_VIDEO_SIZE_DETECT_TIMEOUT):
+            if not self._stopping:
+                logger.error("rawvideo 分辨率解析超时，无法解码")
+            return
+
+        buf = b""
+        while not self._stopping and self._generation == gen and self._ffmpeg_process:
+            w, h = self._frame_w, self._frame_h
+            if w == 0 or h == 0:
+                time.sleep(0.05)
+                continue
+            frame_size = w * h * 3
+
+            # 凑够一帧
+            while len(buf) < frame_size:
+                if self._stopping or self._generation != gen:
+                    return
+                try:
+                    chunk = self._ffmpeg_process.stdout.read(4096)
+                except Exception:
+                    return
+                if not chunk:
+                    return
+                buf += chunk
+                # 尺寸可能在读取过程中变化（旋转），重新计算并丢弃错位数据
+                if (self._frame_w, self._frame_h) != (w, h):
+                    w, h = self._frame_w, self._frame_h
+                    frame_size = w * h * 3
+                    buf = b""
+                    break
+
+            if len(buf) < frame_size:
+                continue
+
+            raw = buf[:frame_size]
+            buf = buf[frame_size:]
+            try:
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape((h, w, 3))
+            except ValueError:
+                continue
+
+            self._publish_frame(frame, w, h)
+
+    def _decode_mjpeg(self, gen: int):
+        """mjpeg JPEG 边界扫描解码（回退路径）。"""
+        buf = b""
+        while not self._stopping and self._generation == gen and self._ffmpeg_process:
+            try:
+                data = self._ffmpeg_process.stdout.read(4096)
+                if not data:
+                    break
+                buf += data
+            except Exception:
+                break
+
+            while True:
+                start = buf.find(b'\xff\xd8')
+                if start == -1:
+                    if len(buf) > _JPEG_BUFFER_MAX:
+                        buf = buf[-1024:]
+                    break
+                end = buf.find(b'\xff\xd9', start + 2)
+                if end == -1:
+                    if len(buf) > _JPEG_BUFFER_MAX:
+                        buf = buf[start:]
+                    break
+                jpeg_data = buf[start:end + 2]
+                buf = buf[end + 2:]
+                frame = cv2.imdecode(np.frombuffer(jpeg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if frame is not None:
+                    h, w = frame.shape[:2]
+                    self._publish_frame(frame, w, h)
+
+    def _publish_frame(self, frame: np.ndarray, w: int, h: int):
+        """覆盖式写最新帧 + 节流 emit + 同步视频尺寸到 control。
+
+        覆盖式缓冲：只保留最新帧，丢弃中间积压帧，消除延迟累积。
+        """
+        with self._frame_lock:
+            # frombuffer 视图自带 base 引用，赋值安全；get_current_frame 取出时会 copy
+            self._current_frame = frame
+
+        # 视频尺寸变化时同步给 control（注入报文需校验视频尺寸）
+        if (w, h) != self._video_size:
+            self._video_size = (w, h)
+            if self._control is not None:
+                self._control.set_video_size(w, h)
+
+        now = time.monotonic()
+        if now - self._last_emit_time >= _FRAME_EMIT_INTERVAL:
+            self._last_emit_time = now
+            self.frame_captured.emit(frame.copy())
 
     def _start_fallback_reader(self):
         self._fallback_thread = threading.Thread(target=self._fallback_loop, daemon=True)
@@ -969,6 +1270,13 @@ class ScrcpyCapture(QObject):
 
     def _cleanup_resources(self):
         with self._cleanup_lock:
+            # 关闭控制通道
+            if self._control is not None:
+                try:
+                    self._control.close()
+                except Exception:
+                    pass
+                self._control = None
             if self._socket:
                 try:
                     return CodecContext.create("h264", "r")
@@ -1133,14 +1441,14 @@ class ScrcpyCapture(QObject):
 
         logger.debug("scrcpy 资源已清理")
 
-    # ===================================================================
-    #  Screencap 回退模式
-    # ===================================================================
+            for thread in [self._writer_thread, self._decoder_thread, self._fallback_thread, self._stderr_thread]:
+                if thread and thread.is_alive():
+                    thread.join(timeout=5)
 
             self._writer_thread = None
             self._decoder_thread = None
             self._fallback_thread = None
-            self._av_codec = None
+            self._stderr_thread = None
 
         while self._running:
             frame = self._capture_screencap()

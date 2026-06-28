@@ -36,7 +36,8 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QListWidget, QListWidgetItem, QStackedWidget,
     QStatusBar, QLabel, QSystemTrayIcon,
-    QMenu, QAction, QSizePolicy, QApplication, QSplitter
+    QMenu, QAction, QSizePolicy, QApplication, QSplitter,
+    QPushButton, QButtonGroup
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
 from PyQt5.QtGui import QIcon, QFont
@@ -47,35 +48,9 @@ from core.device_manager import DeviceManager
 from core.screen_capture import ScrcpyCapture
 from core.ocr_engine import OcrEngine
 from core.step_executor import StepExecutor
+from core.recorder import StepRecorder
 from core.logger import setup_logging
-from ui.panels.log_panel import LogPanel, QtLogHandler
-from ui.panels.workflow_panel import WorkflowPanel
-from ui.panels.config_panel import ConfigPanel
-from ui.panels.device_panel import DevicePanel
-from ui.panels.status_panel import StatusPanel
-from ui.panels.test_panel import TestPanel
-import logging
-import os
-import sys
-import traceback
-
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QListWidget, QListWidgetItem, QStackedWidget,
-    QStatusBar, QLabel, QSystemTrayIcon,
-    QMenu, QAction, QSizePolicy, QApplication, QSplitter
-)
-from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
-from PyQt5.QtGui import QIcon, QFont
-
-from core.config_manager import ConfigManager
-from core.adb_core import AdbCore, _adb
-from core.device_manager import DeviceManager
-from core.screen_capture import ScrcpyCapture
-from core.ocr_engine import OcrEngine
-from core.step_executor import StepExecutor
-from core.script_runner import ScriptRunner
-from core.logger import setup_logging
+from core.task_state_manager import TaskStateManager
 from ui.panels.log_panel import LogPanel, QtLogHandler
 from ui.panels.workflow_panel import WorkflowPanel
 from ui.panels.config_panel import ConfigPanel
@@ -83,6 +58,7 @@ from ui.panels.device_panel import DevicePanel
 from ui.panels.status_panel import StatusPanel
 from ui.panels.test_panel import TestPanel
 from ui.components.step_list_widget import StepListWidget
+from ui.components.mirror_widget import MirrorWidget
 from ui.components.float_widget import FloatingWidget
 from ui.components.task_tab_bar import TaskTabBar
 from ui.components.sidebar_widget import SidebarWidget
@@ -90,7 +66,6 @@ from ui.components.screenshot_picker import ScreenshotPicker
 from ui.components.empty_state_widget import LoadingOverlay
 from ui.components.toast_notification import ToastManager
 from ui.dialogs.workflow_manager_dialog import WorkflowManagerDialog
-from core.task_state_manager import TaskStateManager
 
 
 class _WorkflowWorker(QThread):
@@ -115,6 +90,7 @@ class MainWindow(QMainWindow):
         ("设备管理", "device_management"),
         ("运行监控", "status_monitor"),
         ("测试", "test"),
+        ("投屏录制", "cast_record"),
     ]
 
     def __init__(self, parent=None):
@@ -145,6 +121,7 @@ class MainWindow(QMainWindow):
         self._toast = ToastManager(parent=self)
 
         self._init_ui()
+        self._step_recorder = StepRecorder(parent=self)
         self._init_logging()
         self._init_tray()
         self._connect_signals()
@@ -160,7 +137,7 @@ class MainWindow(QMainWindow):
         self._panels["workflow_editor"].step_deleted.connect(lambda _: self._refresh_preview())
 
     def _init_ui(self):
-        self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
+        self.setWindowTitle("三角洲自动抢券工具v2.0")
         self.setMinimumSize(1200, 800)
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -174,6 +151,30 @@ class MainWindow(QMainWindow):
 
         self._task_bar = TaskTabBar()
         outer.addWidget(self._task_bar)
+
+        # 顶部导航栏：切换 _stacked 面板（工作流编辑 / 配置 / 设备管理 / 运行监控 / 测试 / 投屏录制）
+        self._nav_bar = QWidget()
+        self._nav_bar.setObjectName("navBar")
+        self._nav_bar.setFixedHeight(36)
+        nav_layout = QHBoxLayout(self._nav_bar)
+        nav_layout.setContentsMargins(8, 0, 8, 0)
+        nav_layout.setSpacing(4)
+        self._nav_group = QButtonGroup(self)
+        self._nav_group.setExclusive(True)
+        self._nav_buttons = []
+        for i, (label, key) in enumerate(self.NAV_ITEMS):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setProperty("class", "nav")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, idx=i: self._on_nav_clicked(idx))
+            self._nav_group.addButton(btn, i)
+            nav_layout.addWidget(btn)
+            self._nav_buttons.append(btn)
+        nav_layout.addStretch()
+        if self._nav_buttons:
+            self._nav_buttons[0].setChecked(True)
+        outer.addWidget(self._nav_bar)
 
         body = QWidget()
         body_layout = QHBoxLayout(body)
@@ -197,6 +198,7 @@ class MainWindow(QMainWindow):
             "device_management": DevicePanel(self._device_manager, self._adb_core),
             "status_monitor": StatusPanel(),
             "test": TestPanel(self._step_executor, self._config_manager),
+            "cast_record": MirrorWidget(screen_capture=self._screen_capture),
         }
         for _, key in self.NAV_ITEMS:
             self._stacked.addWidget(self._panels[key])
@@ -209,9 +211,9 @@ class MainWindow(QMainWindow):
 
         # empty state for screenshot area
         self._ss_empty = EmptyStateWidget(
-            icon="📷",
+            icon="📸",
             message="暂无截图",
-            hint="选择坐标步骤后自动截屏"
+            hint="选择坐标步骤后自动截图"
         )
         self._screenshot_picker.setMinimumWidth(400)
 
@@ -353,7 +355,7 @@ class MainWindow(QMainWindow):
             QApplication.beep()
             return
         from PyQt5.QtWidgets import QMessageBox
-        if QMessageBox.question(self, "关闭任务", f"确定关闭任务【{title}】吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        if QMessageBox.question(self, "关闭任务", f"确定关闭任务《{title}》吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self._task_state.remove_task(task_id)
         self._task_bar.remove_task(index)
@@ -504,7 +506,7 @@ class MainWindow(QMainWindow):
                 self._ss_empty.hide()
             else:
                 self._ss_empty.set_state(
-                    icon="⚠",
+                    icon="❌",
                     message="当前步骤无坐标",
                     hint="选择点击/滑动类型步骤"
                 )
@@ -835,7 +837,7 @@ class MainWindow(QMainWindow):
     def _init_tray(self):
         self._tray_icon = QSystemTrayIcon(self)
         self._tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
-        self._tray_icon.setToolTip("三角洲自动抢购工具 v2.0")
+        self._tray_icon.setToolTip("三角洲自动抢券工具v2.0")
 
         tray_menu = QMenu()
 
@@ -899,47 +901,73 @@ class MainWindow(QMainWindow):
         self._step_executor.workflow_failed.connect(self._on_workflow_failed)
         self._step_executor.workflow_stopped.connect(self._on_workflow_stopped)
 
-        # LogPanel 脚本控制按钮
-        self._log_panel.request_run_from.connect(self._on_log_run_from)
-        self._log_panel.request_run_full.connect(self._on_log_run_full)
-        self._log_panel.request_stop.connect(self._on_log_stop)
-        self._script_runner.run_started.connect(self._on_script_run_started)
-        self._script_runner.run_finished.connect(self._on_script_run_finished)
-        self._script_runner.workflow_failed.connect(
-            lambda name, err: logging.error("\u811a\u672c\u5931\u8d25 %s - %s", name, err)
-        )
-        self._script_runner.workflow_stopped.connect(
-            lambda: logging.info("\u811a\u672c\u5df2\u505c\u6b62")
-        )
+        # 投屏录制：交互信号 → 录制器；录制开关 → 启停
+        cast_panel = self._panels["cast_record"]
+        cast_panel.interaction_started.connect(self._step_recorder.on_interaction_started)
+        cast_panel.interaction_ended.connect(self._step_recorder.on_interaction_ended)
+        cast_panel.record_toggled.connect(self._on_record_toggled)
 
-    def _on_log_run_from(self):
-        wf = self._workflow_switcher.current_workflow()
-        if not wf:
-            self._toast.warning("\u672a\u9009\u62e9\u5de5\u4f5c\u6d41")
+    def _on_nav_clicked(self, index: int):
+        """切换 _stacked 面板，并按需隐藏截图选择器（投屏录制面板自带图像显示）。"""
+        if not (0 <= index < len(self.NAV_ITEMS)):
             return
-        idx = self._panels["workflow_editor"].get_current_step_index()
-        if idx < 0:
-            idx = 0
-            logging.info("\u672a\u9009\u4e2d\u6b65\u9aa4\uff0c\u4ece\u7b2c 1 \u6b65\u542f\u52a8")
-        self._script_runner.run_from(wf, idx)
+        self._stacked.setCurrentIndex(index)
+        key = self.NAV_ITEMS[index][1]
+        # 投屏录制面板自带实时画面与坐标显示，隐藏截图选择器腾出空间
+        if key == "cast_record":
+            self._screenshot_picker.hide()
+        else:
+            self._screenshot_picker.show()
+        self.nav_changed.emit(index)
 
-    def _on_log_run_full(self):
-        wf = self._workflow_switcher.current_workflow()
-        if not wf:
-            self._toast.warning("\u672a\u9009\u62e9\u5de5\u4f5c\u6d41")
-            return
-        self._script_runner.run_full(wf)
+    def _on_record_toggled(self, checked: bool):
+        """投屏录制开关：开启则同步分辨率/启动投屏/开始录制并锁定工作流编辑；
+        停止则把录制的步骤追加到当前工作流。"""
+        cast_panel = self._panels["cast_record"]
+        wf_panel = self._panels["workflow_editor"]
+        if checked:
+            # 同步设备分辨率作为录制坐标基准（优先设备实际分辨率，回退工作流配置）
+            dev_res = self._device_manager.get_device_resolution() or wf_panel.get_device_resolution()
+            if dev_res:
+                cast_panel.set_base_resolution(*dev_res)
+                self._step_recorder.set_base_resolution(*dev_res)
+            # 投屏未连接则尝试启动
+            if not self._screen_capture.is_connected():
+                self._start_cast()
+            self._step_recorder.start_recording()
+            cast_panel.set_recording(True)
+            wf_panel.set_editing_locked(True)
+            self.statusBar().showMessage("录制中：在投屏窗口的操作即被录制", 3000)
+        else:
+            steps = self._step_recorder.stop_recording()
+            cast_panel.set_recording(False)
+            wf_panel.set_editing_locked(False)
+            if steps:
+                start_idx = wf_panel.append_recorded_steps(steps)
+                self.statusBar().showMessage(
+                    f"已追加 {len(steps)} 步到工作流（从第 {start_idx + 1} 步起）", 5000
+                )
+            else:
+                self.statusBar().showMessage("录制结束，未生成步骤", 3000)
 
-    def _on_log_stop(self):
-        self._script_runner.stop()
-
-    def _on_script_run_started(self, name: str, idx: int):
-        self._log_panel.set_running(True)
-        logging.info("\u811a\u672c\u542f\u52a8 workflow=%s, start_index=%d", name, idx)
-
-    def _on_script_run_finished(self):
-        self._log_panel.set_running(False)
-        logging.info("\u811a\u672c\u6267\u884c\u7ed3\u675f")
+    def _start_cast(self):
+        """启动 scrcpy 投屏（传 adb_core 供降级注入）。"""
+        serial = self._device_manager.get_current_device()
+        if not serial:
+            self.statusBar().showMessage("请先连接设备再开始录制", 3000)
+            return False
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        jar = os.path.join(base_dir, "lib", "scrcpy-server.jar")
+        if not os.path.exists(jar):
+            self.statusBar().showMessage("未找到 lib/scrcpy-server.jar", 3000)
+            return False
+        dev_res = self._device_manager.get_device_resolution()
+        if dev_res:
+            self._screen_capture.set_base_resolution(*dev_res)
+        ok = self._screen_capture.start(serial, jar, adb_core=self._adb_core)
+        if not ok:
+            self.statusBar().showMessage("投屏启动失败，请检查设备连接", 3000)
+        return ok
 
     def _on_external_workflow_saved(self, workflow_name: str):
         self._workflow_switcher.refresh()
@@ -1000,7 +1028,7 @@ class MainWindow(QMainWindow):
             logging.warning("未选择工作流，无法启动监控")
             return
         if self._workflow_worker is not None and self._workflow_worker.isRunning():
-            logging.warning("工作流正在运行中")
+            logging.warning("监控已在运行中")
             return
         self._panels["workflow_editor"]._clear_undo_redo()
         self._workflow_worker = _WorkflowWorker(self._step_executor, workflow_name, parent=self)
