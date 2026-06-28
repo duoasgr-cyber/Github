@@ -1,4 +1,6 @@
 import logging
+import random
+import re
 import time
 import threading
 from typing import Optional
@@ -18,6 +20,9 @@ from core.steps.dispatch import DispatchMixin
 logger = logging.getLogger(__name__)
 
 _INJECTION_PATTERN = re.compile(r"[;\|`$(){}[\]]")
+
+# 全局最大跳转次数，防止死循环
+_MAX_JUMPS = 1000
 
 
 class StepExecutor(AdbOpsMixin, VisionMixin, FlowControlMixin,
@@ -203,21 +208,111 @@ class StepExecutor(AdbOpsMixin, VisionMixin, FlowControlMixin,
 
     def _run_steps(self, steps: list, workflow_name: str,
                    start_step: int, total_steps: int) -> bool:
-        for i in range(start_step, total_steps):
+        # 构建跳转标签映射表
+        self._jump_labels = self._build_jump_labels(steps)
+        self._jump_counters: dict = {}
+        self._total_jumps = 0
+
+        i = start_step
+        while i < total_steps:
             if self._stop_requested:
                 self._structured_log(logging.INFO, "Workflow stopped: %s", workflow_name)
                 self.workflow_stopped.emit()
-                return
+                return False
             # 使用 Event 替代 busy-wait，暂停时阻塞等待恢复信号
             while self._paused:
                 self._pause_event.clear()
                 self._pause_event.wait()  # 阻塞直到 resume() 调用 set()
-                if self._stopped:
+                if self._stop_requested:
                     self.workflow_stopped.emit()
-                    return
-            self.progress_updated.emit(i + 1, total)
+                    return False
+            self.progress_updated.emit(i + 1, total_steps)
             self.execute_step(workflow_name, i)
+
+            # 跳转处理
+            step = steps[i]
+            jump_to = step.get("jump_to", "")
+            if jump_to:
+                jump_result = self._handle_jump(step, i, steps)
+                if jump_result == "jumped":
+                    i = self._jump_labels.get(jump_to, i + 1)
+                    continue
+                elif jump_result == "error":
+                    return False
+                # "continue" = 不跳转，继续下一步
+
+            i += 1
+
         self.workflow_completed.emit(workflow_name)
+        return True
+
+    # ---- 跳转机制 ----
+
+    @staticmethod
+    def _build_jump_labels(steps: list) -> dict:
+        """扫描步骤，构建 jump_labels 映射表：label -> step_index。"""
+        labels = {}
+        for i, step in enumerate(steps):
+            label = step.get("jump_label", "")
+            if label:
+                labels[label] = i
+            elif step.get("is_jump_target", False):
+                # 标记为跳入点但没有标签，自动生成
+                label = StepExecutor._generate_label(set(labels.keys()))
+                step["jump_label"] = label
+                labels[label] = i
+        return labels
+
+    @staticmethod
+    def _generate_label(existing: set) -> str:
+        """生成唯一的跳转标签，格式 #XXXX（4位十六进制大写）。"""
+        for _ in range(100):
+            label = f"#{random.randint(0, 0xFFFF):04X}"
+            if label not in existing:
+                return label
+        raise RuntimeError("Failed to generate unique jump label after 100 attempts")
+
+    def _handle_jump(self, step: dict, current_index: int, steps: list) -> str:
+        """处理步骤跳转。返回 'jumped' / 'continue' / 'error'。"""
+        jump_to = step.get("jump_to", "")
+        if not jump_to:
+            return "continue"
+
+        # 检查跳转目标是否存在
+        if jump_to not in self._jump_labels:
+            self._structured_log(logging.ERROR, "Jump target not found: %s", jump_to)
+            return "continue"  # 目标不存在则继续执行
+
+        # 条件跳转：评估条件
+        jump_condition = step.get("jump_condition")
+        if jump_condition:
+            try:
+                condition_result = self._evaluate_condition(jump_condition)
+            except Exception as e:
+                self._structured_log(logging.ERROR, "Jump condition eval error: %s", e)
+                return "continue"
+            if not condition_result:
+                return "continue"  # 条件不满足，继续下一步
+
+        # 循环回跳：检查次数限制
+        jump_count = step.get("jump_count", 0)
+        if jump_count > 0:
+            current_count = self._jump_counters.get(jump_to, 0)
+            if current_count >= jump_count:
+                return "continue"  # 已达最大次数，不再跳转
+            self._jump_counters[jump_to] = current_count + 1
+
+        # 全局防死循环保护
+        self._total_jumps += 1
+        if self._total_jumps > _MAX_JUMPS:
+            error_msg = f"Max jump limit ({_MAX_JUMPS}) exceeded"
+            self._structured_log(logging.ERROR, error_msg)
+            self.workflow_failed.emit(self._current_workflow, error_msg)
+            return "error"
+
+        self._structured_log(logging.INFO, "Jumping from step %d to %s (index %d)",
+                             current_index, jump_to, self._jump_labels[jump_to])
+        return "jumped"
 
     def _interruptible_sleep(self, seconds: float) -> None:
         elapsed = 0.0

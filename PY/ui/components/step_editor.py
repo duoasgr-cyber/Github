@@ -203,6 +203,10 @@ ADVANCED_FIELDS = {
     "assign_variable": ("lineedit", {"placeholder": "结果赋值到变量名", "default": ""}),
     "recover_workflow": ("lineedit", {"placeholder": "恢复工作流名称", "default": ""}),
     "comment": ("lineedit", {"placeholder": "备注说明", "default": ""}),
+    # 跳转机制字段
+    "jump_to": ("lineedit", {"placeholder": "跳转目标标签，如 #56D6", "default": ""}),
+    "jump_count": ("spinbox", {"min": 0, "max": 9999, "default": 0}),
+    "is_jump_target": ("checkbox", {"default": False}),
 }
 
 
@@ -242,6 +246,9 @@ FIELD_LABELS = {
     "var_value": "变量值",
     "adb_cmd": "ADB命令",
     "assign_variable": "结果存入变量",
+    "jump_to": "跳转目标",
+    "jump_count": "跳转次数",
+    "is_jump_target": "设为跳入点",
 }
 
 

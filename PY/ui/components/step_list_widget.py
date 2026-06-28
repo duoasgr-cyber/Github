@@ -222,6 +222,7 @@ class StepItemWidget(QWidget):
     """自定义步骤列表项：左侧缩略图（识别步骤）+ 右侧双行文本。"""
 
     THUMB_SIZE = 40
+    jump_clicked = pyqtSignal(str)  # 点击跳转按钮时发射，携带 jump_to 标签名
 
     def __init__(self, step: dict, index: int, parent=None):
         super().__init__(parent)
@@ -316,12 +317,32 @@ class StepItemWidget(QWidget):
         self._line2_label.setStyleSheet("color: #8b949e;")
         self._line2_label.setVisible(bool(summary))
         text_layout.addWidget(self._line2_label)
+
+        # 第三行：跳转信息
+        self._jump_label = QLabel("")
+        self._jump_label.setFont(QFont("Microsoft YaHei", 9))
+        self._jump_label.setStyleSheet("color: #58a6ff;")
+        self._jump_label.setCursor(Qt.PointingHandCursor)
+        self._jump_label.setVisible(False)
+        self._jump_label.mousePressEvent = lambda event: self._on_jump_clicked()
+        text_layout.addWidget(self._jump_label)
+
+        # 第四行：跳入点标记
+        self._jump_target_label = QLabel("")
+        self._jump_target_label.setFont(QFont("Microsoft YaHei", 9))
+        self._jump_target_label.setStyleSheet("color: #f85149;")
+        self._jump_target_label.setVisible(False)
+        text_layout.addWidget(self._jump_target_label)
+
         text_layout.addStretch(1)
 
         layout.addWidget(text_container, stretch=1)
 
         self.setMinimumHeight(52)
-        self.setMaximumHeight(72)
+        self.setMaximumHeight(90)
+
+        # 更新跳转显示
+        self._update_jump_display(step)
 
     def set_state(self, state: str):
         """更新执行状态视觉。"""
@@ -376,6 +397,30 @@ class StepItemWidget(QWidget):
         self._line2_label.setText(summary)
         self._line2_label.setVisible(bool(summary))
 
+        # 更新跳转显示
+        self._update_jump_display(step)
+
+    def _update_jump_display(self, step: dict):
+        """更新跳转信息行和跳入点标记的显示。"""
+        # 跳转出箭头
+        jump_to = step.get("jump_to", "")
+        jump_count = step.get("jump_count", 0)
+        if jump_to:
+            count_str = f" ×{jump_count}" if jump_count > 0 else ""
+            self._jump_label.setText(f"跳转 [->{jump_to}{count_str}]")
+            self._jump_label.setVisible(True)
+        else:
+            self._jump_label.setVisible(False)
+
+        # 跳入点标记
+        jump_label = step.get("jump_label", "")
+        is_jump_target = step.get("is_jump_target", False)
+        if is_jump_target and jump_label:
+            self._jump_target_label.setText(f"跳入点 [{jump_label}]")
+            self._jump_target_label.setVisible(True)
+        else:
+            self._jump_target_label.setVisible(False)
+
     def paintEvent(self, event):
         """绘制左侧颜色条。"""
         painter = QPainter(self)
@@ -402,6 +447,7 @@ class StepListWidget(QListWidget):
     step_delete_requested = pyqtSignal(int)
     step_toggle_enabled = pyqtSignal(int)
     step_reset_result_requested = pyqtSignal(int)
+    step_jump_clicked = pyqtSignal(str)  # 携带 jump_to 标签名
 
     def __init__(self, parent=None):
         super().__init__(parent)
