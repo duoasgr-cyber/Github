@@ -208,21 +208,40 @@ ADVANCED_FIELDS = {
 
 # Field labels
 FIELD_LABELS = {
-    "x": "X坐标", "y": "Y坐标",
-    "x1": "起始X", "y1": "起始Y", "x2": "结束X", "y2": "结束Y",
-    "duration": "持续时间", "seconds": "等待时间", "wait_after": "步后等待",
-    "key": "按键", "text": "文本", "action": "动作",
-    "package": "包名", "save_path": "保存路径",
-    "remote": "设备路径", "local": "本地路径", "path": "文件路径",
-    "template": "模板图片", "threshold": "匹配阈值",
-    "region": "识别区域", "workflow": "工作流",
-    "check": "条件", "then_steps": "真分支", "else_steps": "假分支",
-    "max_count": "最大次数", "condition": "终止条件", "steps": "循环体",
-    "var_name": "变量名", "var_type": "变量类型", "var_value": "变量值",
-    "adb_cmd": "ADB命令", "expression": "表达式",
-    "assign_variable": "赋值变量", "recover_workflow": "恢复工作流",
-    "on_fail": "失败策略", "retry_count": "重试次数", "comment": "备注",
-    "display_name": "显示名称", "enabled": "启用",
+    "enabled": "鍚敤",
+    "display_name": "显示名称",
+    "x": "X坐标",
+    "y": "Y坐标",
+    "x1": "起点X",
+    "y1": "起点Y",
+    "x2": "终点X",
+    "y2": "终点Y",
+    "duration": "时长(ms)",
+    "comment": "备注",
+    "wait_after": "等待后(ms)",
+    "key": "按键",
+    "seconds": "秒数",
+    "action": "动作",
+    "package": "包名",
+    "save_path": "保存路径",
+    "remote": "远程路径",
+    "local": "本地路径",
+    "path": "文件路径",
+    "template": "模板路径",
+    "threshold": "阈值",
+    "region": "区域",
+    "workflow": "工作流",
+    "check": "条件",
+    "then_steps": "满足步骤",
+    "else_steps": "不满足步骤",
+    "max_count": "最大次数",
+    "steps": "步骤",
+    "text": "文本",
+    "var_name": "变量名",
+    "var_type": "变量类型",
+    "var_value": "变量值",
+    "adb_cmd": "ADB命令",
+    "assign_variable": "结果存入变量",
 }
 
 
@@ -313,11 +332,11 @@ class StepEditor(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # Step type label
-        self._type_label = QLabel("未选择步骤")
-        self._type_label.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        self._type_label.setStyleSheet("color: #58a6ff;")
-        layout.addWidget(self._type_label)
+        self._placeholder = QLabel("选择步骤以编辑")
+        self._placeholder.setAlignment(Qt.AlignCenter)
+        self._placeholder.setFont(QFont("Microsoft YaHei", 14))
+        self._placeholder.setStyleSheet("color: #aaaaaa;")
+        self._layout.addWidget(self._placeholder)
 
         # ---- Zone 1: Basic Info (top, fixed) ----
         self._setup_basic_zone(layout)
@@ -861,6 +880,9 @@ class StepEditor(QWidget):
         if self._current_step is None:
             return
         step_type = self._current_step.get("type", "")
+        type_label = QLabel("类型: {}".format(step_type))
+        type_label.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
+        self._form_layout.addWidget(type_label)
 
         # 屏蔽字段信号，避免每个 setValue 各触发一次 step_changed/set_workflow，
         # 导致一次拾取写入多份 workflows.json（x/y 各一次保存）。

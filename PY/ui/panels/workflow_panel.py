@@ -31,9 +31,9 @@ STEP_TYPES = [
     ("keyevent", "按键", {"type": "keyevent", "key": "4", "comment": ""}),
     ("wait", "等待", {"type": "wait", "seconds": 1, "comment": ""}),
     ("wifi", "WiFi控制", {"type": "wifi", "action": "enable", "comment": "", "wait_after": 0}),
-    ("force_stop", "强制停止", {"type": "force_stop", "package": "", "comment": "", "wait_after": 0}),
-    ("launch", "启动应用", {"type": "launch", "package": "", "comment": "", "wait_after": 0}),
-    ("screenshot", "截图", {"type": "screenshot", "save_path": "", "comment": ""}),
+    ("force_stop", "寮哄埗鍋滄", {"type": "force_stop", "package": "", "comment": "", "wait_after": 0}),
+    ("launch", "鍚姩搴旂敤", {"type": "launch", "package": "", "comment": "", "wait_after": 0}),
+    ("screenshot", "鎴浘", {"type": "screenshot", "save_path": "", "comment": ""}),
     ("pull_file", "拉取文件", {"type": "pull_file", "remote": "", "local": "", "comment": ""}),
     ("delete_file", "删除文件", {"type": "delete_file", "path": "", "comment": ""}),
     ("check_image", "图像匹配", {"type": "check_image", "template": "", "threshold": 0.85, "comment": ""}),
@@ -197,7 +197,7 @@ class StepTypeDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("选择步骤类型")
+        self.setWindowTitle("閫夋嫨姝ラ类型")
         self.setMinimumSize(300, 400)
         self._selected_type = None
         self._setup_ui()
@@ -258,7 +258,7 @@ class StepTypeDialog(QDialog):
 
         # 底部按钮
         btn_layout = QHBoxLayout()
-        btn_ok = QPushButton("确定")
+        btn_ok = QPushButton("纭畾")
         btn_cancel = QPushButton("取消")
         btn_ok.clicked.connect(self.accept)
         btn_cancel.clicked.connect(self.reject)
@@ -346,17 +346,17 @@ class WorkflowPanel(QWidget):
         step_toolbar = QHBoxLayout()
         step_toolbar.setSpacing(2)
 
-        btn_add = QPushButton("添加步骤")
+        btn_add = QPushButton("娣诲姞姝ラ")
         btn_add.setFixedHeight(28)
         btn_add.clicked.connect(self.add_step)
         step_toolbar.addWidget(btn_add)
 
-        btn_delete = QPushButton("删除步骤")
+        btn_delete = QPushButton("鍒犻櫎姝ラ")
         btn_delete.setFixedHeight(28)
         btn_delete.clicked.connect(self.delete_step)
         step_toolbar.addWidget(btn_delete)
 
-        btn_copy = QPushButton("复制步骤")
+        btn_copy = QPushButton("澶嶅埗姝ラ")
         btn_copy.setFixedHeight(28)
         btn_copy.clicked.connect(self.copy_step)
         step_toolbar.addWidget(btn_copy)
@@ -777,7 +777,7 @@ class WorkflowPanel(QWidget):
         name = name.strip()
         workflows = self._config_manager.get_all_workflows()
         if name in workflows:
-            QMessageBox.warning(self, "提示", f"工作流 '{name}' 已存在")
+            QMessageBox.warning(self, "提示", f"工作流'{name}' 已存在")
             return
         workflow = {
             "description": "",
@@ -804,7 +804,7 @@ class WorkflowPanel(QWidget):
             return
         workflows = self._config_manager.get_all_workflows()
         if new_name in workflows:
-            QMessageBox.warning(self, "提示", f"工作流 '{new_name}' 已存在")
+            QMessageBox.warning(self, "提示", f"工作流'{new_name}' 已存在")
             return
         workflow_data = workflows.get(old_name, {})
         self._config_manager.delete_workflow(old_name)
@@ -820,7 +820,7 @@ class WorkflowPanel(QWidget):
         reply = QMessageBox.question(
             self,
             "删除工作流",
-            f"确定要删除工作流 '{self._current_workflow_name}' 吗？",
+            f"纭畾瑕佸垹闄ゅ伐浣滄祦 '{self._current_workflow_name}' 吗？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

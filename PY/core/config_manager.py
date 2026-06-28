@@ -23,9 +23,12 @@ class ConfigManager:
             "mail_count_file": "you.txt",
             "auto_increment": True
         },
-        "schedule": {
-            "enabled": False,
-            "start_time": ""
+        "workflow_engine": {
+            "refresh_workflow": "refresh_path",
+            "max_mail_count_default": 190,
+            "status_recovering": "恢复中...",
+            "status_running": "运行中",
+            "status_mail_full": "邮件已满"
         },
         "recognition": {
             "template_threshold": 0.85,

@@ -27,6 +27,34 @@ from ui.panels.config_panel import ConfigPanel
 from ui.panels.device_panel import DevicePanel
 from ui.panels.status_panel import StatusPanel
 from ui.panels.test_panel import TestPanel
+import logging
+import os
+import sys
+import traceback
+
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QListWidget, QListWidgetItem, QStackedWidget,
+    QStatusBar, QLabel, QSystemTrayIcon,
+    QMenu, QAction, QSizePolicy, QApplication, QSplitter
+)
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
+from PyQt5.QtGui import QIcon, QFont
+
+from core.config_manager import ConfigManager
+from core.adb_core import AdbCore, _adb
+from core.device_manager import DeviceManager
+from core.screen_capture import ScrcpyCapture
+from core.ocr_engine import OcrEngine
+from core.step_executor import StepExecutor
+from core.logger import setup_logging
+from ui.panels.log_panel import LogPanel, QtLogHandler
+from ui.panels.workflow_panel import WorkflowPanel
+from ui.panels.config_panel import ConfigPanel
+from ui.panels.device_panel import DevicePanel
+from ui.panels.status_panel import StatusPanel
+from ui.panels.test_panel import TestPanel
+import logging
 import os
 import sys
 import traceback
@@ -132,7 +160,7 @@ class MainWindow(QMainWindow):
         self._panels["workflow_editor"].step_deleted.connect(lambda _: self._refresh_preview())
 
     def _init_ui(self):
-        self.setWindowTitle("三角洲自动抢购工具 v2.0")
+        self.setWindowTitle("涓夎娲茶嚜鍔ㄦ姠璐伐鍏?v2.0")
         self.setMinimumSize(1200, 800)
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -183,7 +211,7 @@ class MainWindow(QMainWindow):
         self._ss_empty = EmptyStateWidget(
             icon="📷",
             message="暂无截图",
-            hint="选择坐标步骤后自动截图"
+            hint="选择坐标步骤后自动截屏"
         )
         self._screenshot_picker.setMinimumWidth(400)
 
@@ -325,7 +353,7 @@ class MainWindow(QMainWindow):
             QApplication.beep()
             return
         from PyQt5.QtWidgets import QMessageBox
-        if QMessageBox.question(self, "关闭任务", f"确定关闭任务《{title}》吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        if QMessageBox.question(self, "关闭任务", f"确定关闭任务【{title}】吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self._task_state.remove_task(task_id)
         self._task_bar.remove_task(index)

@@ -1,8 +1,9 @@
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 
-def setup_logging(log_file: str = "app.log", level: str = "INFO", qt_handler: logging.Handler = None) -> logging.Logger:
+def setup_logging(log_file: str = "app.log", level: str = "INFO", qt_handler: logging.Handler = None, max_log_size_mb: float = 1.0) -> logging.Logger:
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
@@ -13,7 +14,10 @@ def setup_logging(log_file: str = "app.log", level: str = "INFO", qt_handler: lo
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
 
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    max_bytes = int(max_log_size_mb * 1024 * 1024)
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=max_bytes, backupCount=5, encoding="utf-8"
+    )
     formatter = logging.Formatter(
         "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
         datefmt="%H:%M:%S",

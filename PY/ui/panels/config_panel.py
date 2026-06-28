@@ -80,7 +80,28 @@ class ConfigPanel(QWidget):
         self._loaded = True
 
     def _init_ui(self):
-        outer = QHBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(12)
+
+        layout.addWidget(self._create_buy_params_group())
+        layout.addWidget(self._create_mail_params_group())
+        layout.addWidget(self._create_recognition_group())
+        layout.addWidget(self._create_ocr_regions_group())
+        layout.addWidget(self._create_wifi_control_group())
+        layout.addWidget(self._create_device_group())
+        layout.addWidget(self._create_timing_group())
+        layout.addWidget(self._create_logging_group())
+        layout.addWidget(self._create_ui_group())
+        layout.addStretch()
+
+        scroll.setWidget(container)
+
+        outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
@@ -280,23 +301,6 @@ class ConfigPanel(QWidget):
         auto_increment = QCheckBox("自动递增")
         self._widgets["mail_params.auto_increment"] = auto_increment
         self._add_form_row_with_desc(form, "", auto_increment, "mail_params.auto_increment")
-
-        group.setLayout(form)
-        return group
-
-    def _create_schedule_group(self):
-        group = QGroupBox("定时启动")
-        form = QFormLayout()
-        form.setSpacing(8)
-
-        enabled = QCheckBox("启用定时")
-        self._widgets["schedule.enabled"] = enabled
-        self._add_form_row_with_desc(form, "", enabled, "schedule.enabled")
-
-        start_time = QTimeEdit()
-        start_time.setDisplayFormat("HH:mm")
-        self._widgets["schedule.start_time"] = start_time
-        self._add_form_row_with_desc(form, "启动时间:", start_time, "schedule.start_time")
 
         group.setLayout(form)
         return group
