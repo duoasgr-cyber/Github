@@ -421,6 +421,12 @@ class StepItemWidget(QWidget):
         else:
             self._jump_target_label.setVisible(False)
 
+    def _on_jump_clicked(self):
+        """点击跳转按钮时发射信号，携带目标标签名。"""
+        jump_to = self._step.get("jump_to", "")
+        if jump_to:
+            self.jump_clicked.emit(jump_to)
+
     def paintEvent(self, event):
         """绘制左侧颜色条。"""
         painter = QPainter(self)
@@ -605,6 +611,7 @@ class StepListWidget(QListWidget):
 
                 # 创建自定义 widget
                 step_widget = StepItemWidget(step, i, self)
+                step_widget.jump_clicked.connect(self.step_jump_clicked.emit)
                 enabled = step.get("enabled", True)
                 state = self._step_states.get(i, "pending")
                 if not enabled:
