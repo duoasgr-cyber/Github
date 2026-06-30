@@ -1,4 +1,5 @@
 import copy
+import random
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPainter, QPen
@@ -433,6 +434,7 @@ class WorkflowPanel(QWidget):
         self._step_list.step_clicked.connect(self._on_step_clicked)
         self._step_list.step_order_changed.connect(self._on_step_order_changed)
         self._step_list.step_reset_result_requested.connect(self._on_reset_step_result)
+        self._step_list.step_jump_clicked.connect(self._on_jump_clicked)
         self._step_editor.step_changed.connect(self._on_step_changed)
         self.step_selected.connect(self._on_step_selected_for_editor)
 
@@ -479,11 +481,54 @@ class WorkflowPanel(QWidget):
         steps = workflow.get("steps", [])
         if index >= len(steps):
             return
+        # 确保跳入点步骤有 jump_label
+        self._ensure_jump_label(updated_step, steps)
         steps[index] = updated_step
         workflow["steps"] = steps
         self._config_manager.set_workflow(self._current_workflow_name, workflow)
         self.refresh_step_list()
         self._step_list.setCurrentRow(index)
+
+    def _on_jump_clicked(self, jump_to: str):
+        """点击步骤列表中的跳转按钮，滚动并选中目标步骤。"""
+        if not self._current_workflow_name or not jump_to:
+            return
+        workflow = self._config_manager.get_workflow(self._current_workflow_name)
+        if not workflow:
+            return
+        steps = workflow.get("steps", [])
+        for i, step in enumerate(steps):
+            if step.get("jump_label") == jump_to:
+                self._step_list.setCurrentRow(i)
+                self._step_list.scrollToItem(self._step_list.item(i))
+                return
+
+    @staticmethod
+    def _gen_label(existing: set) -> str:
+        """生成唯一的跳转标签 #XXXX。"""
+        for _ in range(100):
+            label = f"#{random.randint(0, 0xFFFF):04X}"
+            if label not in existing:
+                return label
+        return f"#{random.randint(0, 0xFFFF):04X}"
+
+    def _ensure_jump_label(self, step: dict, all_steps: list):
+        """确保单个跳入点步骤有 jump_label（就地修改）。"""
+        if step.get("is_jump_target") and not step.get("jump_label"):
+            existing = {s.get("jump_label") for s in all_steps if s.get("jump_label")}
+            step["jump_label"] = self._gen_label(existing)
+
+    def _ensure_jump_labels(self, steps: list) -> bool:
+        """批量确保所有 is_jump_target=true 的步骤都有 jump_label。返回是否有变更。"""
+        existing = {s.get("jump_label") for s in steps if s.get("jump_label")}
+        changed = False
+        for step in steps:
+            if step.get("is_jump_target") and not step.get("jump_label"):
+                label = self._gen_label(existing)
+                step["jump_label"] = label
+                existing.add(label)
+                changed = True
+        return changed
 
     def _on_reset_step_result(self, index: int):
         """重置步骤执行结果"""
@@ -556,6 +601,13 @@ class WorkflowPanel(QWidget):
         self._clear_undo_redo()
         name = self._workflow_combo.itemText(index)
         self._current_workflow_name = name
+        # 确保所有跳入点步骤都有 jump_label
+        workflow = self._config_manager.get_workflow(name)
+        if workflow:
+            steps = workflow.get("steps", [])
+            if self._ensure_jump_labels(steps):
+                workflow["steps"] = steps
+                self._config_manager.set_workflow(name, workflow)
         self.refresh_step_list()
         self._step_editor.clear_step()
         self.workflow_selected.emit(name)

@@ -1,8 +1,12 @@
 import ast
 import logging
 import operator
+import re
 
 logger = logging.getLogger(__name__)
+
+# 变量引用模式：${var_name}
+_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
 
 # 安全的二元运算映射
 _SAFE_OPERATORS = {
@@ -104,3 +108,24 @@ def evaluate_expression(expression: str, variables: dict = None) -> object:
     except Exception as e:
         logger.warning("Expression evaluation failed: %s -> %s", expression, e)
         raise ValueError(f"Expression evaluation failed: {e}")
+
+
+def step_expression(step: dict, variables: dict = None) -> bool:
+    """处理 expression 步骤，对表达式求值并返回布尔结果。
+
+    step 字段：
+    - expression: 表达式字符串，如 "${count} + 1 > 10"
+
+    将 ${var} 语法转换为纯变量名后调用 evaluate_expression。
+    """
+    expr = step.get("expression", "")
+    if not expr:
+        return True
+    # 将 ${var} 替换为 var（evaluate_expression 从 variables 查找）
+    expr = _VAR_PATTERN.sub(r"\1", expr)
+    try:
+        result = evaluate_expression(expr, variables)
+        return bool(result)
+    except ValueError as e:
+        logger.warning("step_expression failed: %s", e)
+        return False

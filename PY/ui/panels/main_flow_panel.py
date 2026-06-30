@@ -1,4 +1,5 @@
 import copy
+import random
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -221,6 +222,7 @@ class MainFlowPanel(QWidget):
     def _connect_signals(self):
         self._step_list.step_clicked.connect(self._on_step_clicked)
         self._step_list.step_order_changed.connect(self._on_step_order_changed)
+        self._step_list.step_jump_clicked.connect(self._on_jump_clicked)
         self._step_editor.step_changed.connect(self._on_step_changed)
         self._step_editor.coord_pick_requested.connect(self._on_coord_pick_requested)
         self._screenshot_picker.point_selected.connect(self._on_point_selected)
@@ -261,6 +263,11 @@ class MainFlowPanel(QWidget):
 
     def load_main_flow(self):
         self._main_flow = self._config_manager.get_main_flow()
+        # 确保所有跳入点步骤都有 jump_label
+        steps = self._main_flow.get("steps", [])
+        if self._ensure_jump_labels(steps):
+            self._main_flow["steps"] = steps
+            self._config_manager.set_main_flow(self._main_flow)
         self._refresh_step_list()
         self._update_desc_button()
         self._step_editor.clear_step()
@@ -319,6 +326,8 @@ class MainFlowPanel(QWidget):
         steps = self._main_flow.get("steps", [])
         if index >= len(steps):
             return
+        # 确保跳入点步骤有 jump_label
+        self._ensure_jump_label(updated_step, steps)
         steps[index] = updated_step
         self._main_flow["steps"] = steps
         self._refresh_step_list()
@@ -329,6 +338,44 @@ class MainFlowPanel(QWidget):
         """若流程图可见则刷新（数据变更后保持同步）。"""
         if self._flow_chart_view.isVisible():
             self._flow_chart_view.load_main_flow(self._main_flow)
+
+    def _on_jump_clicked(self, jump_to: str):
+        """点击步骤列表中的跳转按钮，滚动并选中目标步骤。"""
+        if not jump_to:
+            return
+        steps = self._main_flow.get("steps", [])
+        for i, step in enumerate(steps):
+            if step.get("jump_label") == jump_to:
+                self._step_list.setCurrentRow(i)
+                self._step_list.scrollToItem(self._step_list.item(i))
+                return
+
+    @staticmethod
+    def _gen_label(existing: set) -> str:
+        """生成唯一的跳转标签 #XXXX。"""
+        for _ in range(100):
+            label = f"#{random.randint(0, 0xFFFF):04X}"
+            if label not in existing:
+                return label
+        return f"#{random.randint(0, 0xFFFF):04X}"
+
+    def _ensure_jump_label(self, step: dict, all_steps: list):
+        """确保单个跳入点步骤有 jump_label（就地修改）。"""
+        if step.get("is_jump_target") and not step.get("jump_label"):
+            existing = {s.get("jump_label") for s in all_steps if s.get("jump_label")}
+            step["jump_label"] = self._gen_label(existing)
+
+    def _ensure_jump_labels(self, steps: list) -> bool:
+        """批量确保所有 is_jump_target=true 的步骤都有 jump_label。返回是否有变更。"""
+        existing = {s.get("jump_label") for s in steps if s.get("jump_label")}
+        changed = False
+        for step in steps:
+            if step.get("is_jump_target") and not step.get("jump_label"):
+                label = self._gen_label(existing)
+                step["jump_label"] = label
+                existing.add(label)
+                changed = True
+        return changed
 
     def _on_point_selected(self, x: int, y: int):
         self._step_editor.update_coord_fields(x, y)
